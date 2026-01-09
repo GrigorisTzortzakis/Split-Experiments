@@ -1,0 +1,34 @@
+{
+  "client": {
+    "samples": 286,
+    "cpu_pct_avg": 337.4685314685314,
+    "cpu_pct_max": 363.6,
+    "cpu_pct_avg_per_core": 42.183566433566426,
+    "cpu_pct_max_per_core": 45.45,
+    "rss_mb_avg": 166.1208479020979,
+    "rss_mb_max": 312.6875,
+    "limits": {
+      "cpu_seconds": 900,
+      "memory_mb": 768,
+      "device": "cpu"
+    },
+    "device": "cpu",
+    "checkpoint_path": "/Users/grigoristzortzakis/Documents/PHD/Split Experiments/Single user/client_checkpoint.pt"
+  },
+  "server": {
+    "samples": 7036,
+    "cpu_pct_avg": 306.9954661739628,
+    "cpu_pct_max": 360.4,
+    "cpu_pct_avg_per_core": 38.37443327174535,
+    "cpu_pct_max_per_core": 45.05,
+    "rss_mb_avg": 115.84956607092097,
+    "rss_mb_max": 267.015625,
+    "limits": {
+      "cpu_seconds": 3600,
+      "memory_mb": 8192
+    },
+    "device": "mps",
+    "checkpoint_path": "/Users/grigoristzortzakis/Documents/PHD/Split Experiments/Single user/server_checkpoint.pt",
+    "resource_report_path": "/Users/grigoristzortzakis/Documents/PHD/Split Experiments/Single user/server_resources.json"
+  }
+}
