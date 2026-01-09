@@ -1,0 +1,72 @@
+/Users/grigoristzortzakis/Documents/PHD/Split Experiments/Single User-Alibaba/server.py:18: DeprecationWarning: websockets.server.WebSocketServerProtocol is deprecated
+  from websockets.server import WebSocketServerProtocol
+[14:00:26] INFO: server listening on 127.0.0.1:8765
+[14:00:26] INFO: listening on ws://127.0.0.1:8765 cut_layer=1 device=mps
+[14:10:26] INFO: connection open
+[14:10:26] INFO: client connected from ('127.0.0.1', 51173)
+/Users/grigoristzortzakis/Documents/PHD/Split Experiments/Single User-Alibaba/server.py:55: UserWarning: The given buffer is not writable, and PyTorch does not support non-writable tensors. This means you can write to the underlying (supposedly non-writable) buffer using the tensor. You may want to copy the buffer to protect its data or make it writable before converting it to a tensor. This type of warning will be suppressed for the rest of this program. (Triggered internally at /Users/runner/work/pytorch/pytorch/pytorch/torch/csrc/utils/tensor_new.cpp:1584.)
+  return torch.frombuffer(raw, dtype=dtype).clone().reshape(shape)
+[14:10:28] INFO: [server] batches=50 loss=0.3119 acc=0.8828 cpu=45.9 rss=98.4MB dt=2.3ms
+[14:10:29] INFO: [server] batches=100 loss=0.2914 acc=0.9023 cpu=45.4 rss=100.1MB dt=2.3ms
+[14:10:30] INFO: [server] batches=150 loss=0.1959 acc=0.9414 cpu=46.2 rss=101.1MB dt=2.4ms
+[14:10:30] INFO: [server] batches=200 loss=0.1873 acc=0.9336 cpu=43.6 rss=101.6MB dt=2.3ms
+[14:10:31] INFO: [server] batches=250 loss=0.1570 acc=0.9336 cpu=43.8 rss=102.0MB dt=2.4ms
+[14:10:32] INFO: [server] batches=300 loss=0.0895 acc=0.9727 cpu=43.4 rss=102.5MB dt=2.4ms
+[14:10:33] INFO: [server] batches=350 loss=0.1332 acc=0.9648 cpu=44.7 rss=102.7MB dt=2.1ms
+[14:10:33] INFO: [server] batches=400 loss=0.0960 acc=0.9609 cpu=43.5 rss=102.9MB dt=2.2ms
+[14:10:34] INFO: [server] batches=450 loss=0.1970 acc=0.9414 cpu=45.6 rss=103.2MB dt=2.2ms
+[14:10:35] INFO: [server] batches=500 loss=0.1172 acc=0.9609 cpu=44.3 rss=103.3MB dt=2.2ms
+[14:10:35] INFO: [server] batches=550 loss=0.1192 acc=0.9531 cpu=46.0 rss=103.5MB dt=2.4ms
+[14:10:36] INFO: [server] batches=600 loss=0.1661 acc=0.9414 cpu=44.7 rss=103.6MB dt=2.3ms
+[14:10:38] INFO: [server] batches=650 loss=0.1152 acc=0.9805 cpu=44.5 rss=103.7MB dt=2.4ms
+[14:10:38] INFO: [server] batches=700 loss=0.2531 acc=0.9453 cpu=45.8 rss=103.8MB dt=2.3ms
+[14:10:39] INFO: [server] batches=750 loss=0.1489 acc=0.9570 cpu=47.8 rss=103.9MB dt=2.3ms
+[14:10:40] INFO: [server] batches=800 loss=0.1063 acc=0.9727 cpu=43.4 rss=104.0MB dt=2.1ms
+[14:10:41] INFO: [server] batches=850 loss=0.0971 acc=0.9648 cpu=42.5 rss=104.0MB dt=2.2ms
+[14:10:41] INFO: [server] batches=900 loss=0.0917 acc=0.9688 cpu=43.7 rss=104.1MB dt=2.1ms
+[14:10:42] INFO: [server] batches=950 loss=0.0965 acc=0.9766 cpu=43.3 rss=104.2MB dt=2.3ms
+[14:10:43] INFO: [server] batches=1000 loss=0.0862 acc=0.9727 cpu=44.5 rss=108.8MB dt=2.2ms
+[14:10:43] INFO: [server] batches=1050 loss=0.1525 acc=0.9453 cpu=43.2 rss=108.9MB dt=2.3ms
+[14:10:44] INFO: [server] batches=1100 loss=0.1265 acc=0.9414 cpu=45.4 rss=109.1MB dt=2.4ms
+[14:10:45] INFO: [server] batches=1150 loss=0.1243 acc=0.9688 cpu=44.5 rss=109.2MB dt=2.3ms
+[14:10:46] INFO: [server] batches=1200 loss=0.1040 acc=0.9609 cpu=45.8 rss=109.2MB dt=2.4ms
+[14:10:46] INFO: [server] batches=1250 loss=0.0569 acc=0.9883 cpu=44.9 rss=109.3MB dt=2.4ms
+[14:10:48] INFO: [server] batches=1300 loss=0.1002 acc=0.9727 cpu=44.4 rss=109.4MB dt=2.3ms
+[14:10:48] INFO: [server] batches=1350 loss=0.0869 acc=0.9727 cpu=42.7 rss=109.5MB dt=2.3ms
+[14:10:49] INFO: [server] batches=1400 loss=0.1172 acc=0.9648 cpu=42.3 rss=109.5MB dt=2.1ms
+[14:10:50] INFO: [server] batches=1450 loss=0.0793 acc=0.9688 cpu=44.6 rss=109.5MB dt=2.3ms
+[14:10:51] INFO: [server] batches=1500 loss=0.1147 acc=0.9688 cpu=42.4 rss=109.6MB dt=2.1ms
+[14:10:51] INFO: [server] batches=1550 loss=0.0835 acc=0.9648 cpu=46.0 rss=109.6MB dt=2.3ms
+[14:10:52] INFO: [server] batches=1600 loss=0.1176 acc=0.9414 cpu=43.6 rss=109.7MB dt=2.3ms
+[14:10:53] INFO: [server] batches=1650 loss=0.0643 acc=0.9766 cpu=49.0 rss=109.8MB dt=2.2ms
+[14:10:53] INFO: [server] batches=1700 loss=0.1064 acc=0.9766 cpu=46.9 rss=109.8MB dt=2.3ms
+[14:10:54] INFO: [server] batches=1750 loss=0.0892 acc=0.9688 cpu=42.1 rss=109.9MB dt=2.4ms
+[14:10:55] INFO: [server] batches=1800 loss=0.0744 acc=0.9766 cpu=45.1 rss=110.0MB dt=2.2ms
+[14:10:56] INFO: [server] batches=1850 loss=0.0817 acc=0.9609 cpu=46.2 rss=110.0MB dt=2.3ms
+[14:10:57] INFO: [server] batches=1900 loss=0.0805 acc=0.9805 cpu=46.0 rss=110.1MB dt=2.3ms
+[14:10:58] INFO: [server] batches=1950 loss=0.0706 acc=0.9805 cpu=43.9 rss=110.1MB dt=2.2ms
+[14:10:58] INFO: [server] batches=2000 loss=0.0833 acc=0.9805 cpu=45.9 rss=110.2MB dt=2.2ms
+[14:10:59] INFO: [server] batches=2050 loss=0.0834 acc=0.9727 cpu=45.2 rss=110.2MB dt=2.3ms
+[14:11:00] INFO: [server] batches=2100 loss=0.0922 acc=0.9648 cpu=45.5 rss=110.3MB dt=2.4ms
+[14:11:01] INFO: [server] batches=2150 loss=0.0869 acc=0.9766 cpu=47.2 rss=110.3MB dt=2.4ms
+[14:11:01] INFO: [server] batches=2200 loss=0.0757 acc=0.9688 cpu=41.9 rss=110.3MB dt=2.2ms
+[14:11:02] INFO: [server] batches=2250 loss=0.0981 acc=0.9648 cpu=44.7 rss=110.9MB dt=2.2ms
+[14:11:03] INFO: [server] batches=2300 loss=0.0818 acc=0.9688 cpu=45.5 rss=111.0MB dt=2.3ms
+[14:11:03] INFO: [server] batches=2350 loss=0.1512 acc=0.9609 cpu=44.8 rss=111.0MB dt=2.3ms
+[14:11:04] INFO: [server] batches=2400 loss=0.0690 acc=0.9688 cpu=46.5 rss=111.0MB dt=2.3ms
+[14:11:05] INFO: [server] batches=2450 loss=0.0938 acc=0.9648 cpu=42.6 rss=111.2MB dt=2.4ms
+[14:11:06] INFO: [server] batches=2500 loss=0.1072 acc=0.9648 cpu=44.9 rss=111.3MB dt=2.2ms
+[14:11:07] INFO: [server] batches=2550 loss=0.0539 acc=0.9766 cpu=43.7 rss=111.3MB dt=2.4ms
+[14:11:08] INFO: [server] batches=2600 loss=0.0688 acc=0.9805 cpu=45.9 rss=111.3MB dt=2.2ms
+[14:11:08] INFO: [server] batches=2650 loss=0.0848 acc=0.9727 cpu=44.7 rss=111.3MB dt=2.4ms
+[14:11:09] INFO: [server] batches=2700 loss=0.0791 acc=0.9609 cpu=44.5 rss=111.4MB dt=2.3ms
+[14:11:10] INFO: [server] batches=2750 loss=0.1072 acc=0.9648 cpu=46.2 rss=111.4MB dt=2.2ms
+[14:11:10] INFO: [server] batches=2800 loss=0.0678 acc=0.9883 cpu=44.3 rss=111.5MB dt=2.4ms
+[14:11:11] INFO: [server] batches=2850 loss=0.0506 acc=0.9805 cpu=42.9 rss=111.5MB dt=2.5ms
+[14:11:12] INFO: [server] batches=2900 loss=0.0874 acc=0.9688 cpu=44.2 rss=111.5MB dt=2.3ms
+[14:11:13] INFO: [server] batches=2950 loss=0.1092 acc=0.9570 cpu=45.7 rss=113.0MB dt=1.9ms
+[14:11:13] INFO: [server] batches=3000 loss=0.0835 acc=0.9727 cpu=45.6 rss=113.0MB dt=2.2ms
+[14:11:14] INFO: [server] batches=3050 loss=0.0880 acc=0.9727 cpu=42.3 rss=113.1MB dt=2.1ms
+[14:11:15] INFO: [server] batches=3100 loss=0.0801 acc=0.9727 cpu=44.7 rss=113.2MB dt=2.0ms
+[14:11:17] INFO: saved server checkpoint to /Users/grigoristzortzakis/Documents/PHD/Split Experiments/Single User-Alibaba/server_checkpoint.pt
+[14:11:17] INFO: wrote server resource report to /Users/grigoristzortzakis/Documents/PHD/Split Experiments/Single User-Alibaba/server_resources.json
