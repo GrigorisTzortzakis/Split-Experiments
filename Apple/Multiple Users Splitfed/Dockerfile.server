@@ -1,0 +1,37 @@
+# syntax=docker/dockerfile:1
+FROM python:3.9-slim AS base
+
+WORKDIR /app
+
+# psutil may require compilation on linux/aarch64; install minimal build tooling.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc \
+    python3-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN pip install --no-cache-dir \
+    "numpy<2" \
+    torch==2.0.1 \
+    torchvision==0.15.2 \
+    websockets==11.0.3 \
+    psutil==5.9.5 \
+    matplotlib==3.7.2 \
+    mlflow==2.8.1
+
+COPY *.py /app/
+
+EXPOSE 8765 8766
+
+CMD ["python", "server.py", \
+     "--host", "0.0.0.0", \
+     "--port", "8765", \
+     "--cut-layer", "1", \
+     "--device", "cpu", \
+     "--seed", "17", \
+     "--learning-rate", "0.01", \
+     "--momentum", "0.0", \
+     "--log-every", "200", \
+     "--output-dir", "/app/outputs", \
+     "--mlflow", \
+     "--mlflow-uri", "file:/app/mlruns", \
+     "--mlflow-experiment", "split-learning"]
