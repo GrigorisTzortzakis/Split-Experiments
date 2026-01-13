@@ -223,14 +223,29 @@ class SplitLearningServer:
         self._ws_global_by_round[0] = ws0
         self._ws_global_hash_by_round[0] = self._hash_state_dict(ws0)
 
-        # SFLV1: single shared server model; aggregated-gradient update.
-        # round_id -> client_id -> deque[(step_idx, activations, labels, websocket)]
-        self._pending_v1: Dict[int, Dict[int, Deque[tuple[int, TensorPayload, TensorPayload, WebSocketServerProtocol]]]] = {}
+        # SplitFed scheduling.
+        #
+        # SFLV1 (paper Algorithm 1 as written): one shared server model W^S_t.
+        # For each (round_id, step_idx), wait until one message from every client arrives,
+        # compute per-client gradients g_k, aggregate g = Σ_k (n_k/Σ n_k) * g_k,
+        # then apply exactly one optimizer.step().
+        # round_id -> step_idx -> client_id -> (activations, labels, websocket)
+        self._pending_v1_steps: Dict[
+            int,
+            Dict[int, Dict[int, tuple[TensorPayload, TensorPayload, WebSocketServerProtocol]]],
+        ] = {}
+        self._v1_next_step: Dict[int, int] = {}
         self._v1_processing: Dict[int, bool] = {}
 
-        # SFLV2: single shared server model; sequential updates in randomized order.
-        # round_id -> deque[(client_id, step_idx, activations, labels, websocket)]
-        self._pending_v2: Dict[int, Deque[tuple[int, int, TensorPayload, TensorPayload, WebSocketServerProtocol]]] = {}
+        # SFLV2 (paper): synchronous receive per step (barrier), then sequentially
+        # process clients in a random permutation, updating the shared server model
+        # after each client's forward-backward.
+        # round_id -> step_idx -> client_id -> (activations, labels, websocket)
+        self._pending_v2_steps: Dict[
+            int,
+            Dict[int, Dict[int, tuple[TensorPayload, TensorPayload, WebSocketServerProtocol]]],
+        ] = {}
+        self._v2_next_step: Dict[int, int] = {}
         self._v2_processing: Dict[int, bool] = {}
 
         # Round completion tracking (for server_round_ready barrier).
@@ -323,12 +338,21 @@ class SplitLearningServer:
                 self._nk_by_client_id.pop(int(cid), None)
                 # Best-effort cleanup: drop any pending entries for this client.
                 try:
-                    for _round, per_client in list(self._pending_v1.items()):
-                        q = per_client.get(int(cid))
-                        if q is not None:
-                            q.clear()
-                    for _round, q2 in list(self._pending_v2.items()):
-                        self._pending_v2[_round] = deque([item for item in q2 if int(item[0]) != int(cid)])
+                    for _round, per_step in list(self._pending_v1_steps.items()):
+                        for _step, bucket in list(per_step.items()):
+                            bucket.pop(int(cid), None)
+                            if not bucket:
+                                per_step.pop(_step, None)
+                        if not per_step:
+                            self._pending_v1_steps.pop(_round, None)
+                    # Remove any buffered SFLV2 messages for this client.
+                    for _round, per_step in list(self._pending_v2_steps.items()):
+                        for _step, bucket in list(per_step.items()):
+                            bucket.pop(int(cid), None)
+                            if not bucket:
+                                per_step.pop(_step, None)
+                        if not per_step:
+                            self._pending_v2_steps.pop(_round, None)
                 except Exception:
                     pass
                 self.logger.info("client_id=%s cleaned up", cid)
@@ -431,16 +455,23 @@ class SplitLearningServer:
         step_idx = int(req.get("step_idx", 0) or 0)
 
         if self._sfl_variant == "v1":
-            per_round = self._pending_v1.setdefault(round_id, {})
-            q = per_round.setdefault(int(cid), deque())
-            q.append((step_idx, req["activations"], req["labels"], websocket))
+            per_round = self._pending_v1_steps.setdefault(round_id, {})
+            bucket = per_round.setdefault(step_idx, {})
+            bucket[int(cid)] = (req["activations"], req["labels"], websocket)
+            if round_id not in self._v1_next_step:
+                self._v1_next_step[round_id] = 0
             if not self._v1_processing.get(round_id, False):
                 self._v1_processing[round_id] = True
                 asyncio.create_task(self._process_v1_round(round_id))
             return
 
-        q2 = self._pending_v2.setdefault(round_id, deque())
-        q2.append((int(cid), step_idx, req["activations"], req["labels"], websocket))
+        # SFLV2: buffer by (round, step) until we have one message from every client.
+        per_round = self._pending_v2_steps.setdefault(round_id, {})
+        bucket = per_round.setdefault(step_idx, {})
+        bucket[int(cid)] = (req["activations"], req["labels"], websocket)
+        if round_id not in self._v2_next_step:
+            self._v2_next_step[round_id] = 0
+
         if not self._v2_processing.get(round_id, False):
             self._v2_processing[round_id] = True
             asyncio.create_task(self._process_v2_round(round_id))
@@ -450,17 +481,11 @@ class SplitLearningServer:
         try:
             expected = self._expected_clients()
             while True:
-                per_round = self._pending_v1.get(round_id) or {}
-                if expected <= 0:
+                next_step = int(self._v1_next_step.get(round_id, 0))
+                per_round = self._pending_v1_steps.get(round_id) or {}
+                bucket = per_round.get(next_step)
+                if expected <= 0 or bucket is None or len(bucket) < expected:
                     break
-
-                # Need at least one pending batch per client.
-                if not all((cid in per_round and len(per_round[cid]) > 0) for cid in range(expected)):
-                    break
-
-                popped: Dict[int, tuple[int, TensorPayload, TensorPayload, WebSocketServerProtocol]] = {}
-                for cid in range(expected):
-                    popped[cid] = per_round[cid].popleft()
 
                 nks = {cid: int(self._nk_by_client_id.get(cid, 1)) for cid in range(expected)}
                 total_n = sum(max(v, 0) for v in nks.values())
@@ -474,46 +499,40 @@ class SplitLearningServer:
                     self.model.train()
                     self.optimizer.zero_grad(set_to_none=True)
 
-                    acts_t: Dict[int, torch.Tensor] = {}
-                    logits_t: Dict[int, torch.Tensor] = {}
-                    labels_t: Dict[int, torch.Tensor] = {}
-                    losses_t: Dict[int, torch.Tensor] = {}
+                    params = list(self.model.parameters())
+                    agg_grads: list[Optional[torch.Tensor]] = [None for _ in params]
 
-                    for cid, (step_idx, acts_payload, labels_payload, _ws) in popped.items():
+                    acks: list[tuple[WebSocketServerProtocol, Dict[str, Any]]] = []
+                    losses: list[float] = []
+                    correct_sum = 0
+                    total_sum = 0
+
+                    # Compute per-client gradients WITHOUT stepping between clients.
+                    for cid in range(expected):
+                        item = bucket.get(int(cid))
+                        if item is None:
+                            return
+                        acts_payload, labels_payload, ws = item
                         acts = _payload_to_tensor(acts_payload).to(self.device)
                         labels = _payload_to_tensor(labels_payload).to(self.device)
                         acts.requires_grad_(True)
                         logits = self.model(acts)
                         loss = self.criterion(logits, labels)
-                        acts_t[cid] = acts
-                        logits_t[cid] = logits
-                        labels_t[cid] = labels
-                        losses_t[cid] = loss
-
-                    total_loss = None
-                    for cid in range(expected):
                         w = float(weights.get(cid, 0.0))
-                        part = losses_t[cid] * w
-                        total_loss = part if total_loss is None else (total_loss + part)
-                    assert total_loss is not None
-                    total_loss.backward()
-                    self.optimizer.step()
 
-                    losses: list[float] = []
-                    correct_sum = 0
-                    total_sum = 0
-                    acks: list[tuple[WebSocketServerProtocol, Dict[str, Any]]] = []
-                    next_step = int(self._global_step + 1)
-                    for cid, (step_idx, _acts_payload, _labels_payload, ws) in popped.items():
-                        acts = acts_t[cid]
-                        logits = logits_t[cid]
-                        labels = labels_t[cid]
-                        loss_val = float(losses_t[cid].item())
-                        grads_acts_cpu = acts.grad.detach().cpu()
+                        grads_params = torch.autograd.grad(loss, params, retain_graph=False, create_graph=False)
+                        grads_acts = torch.autograd.grad(loss, acts, retain_graph=False, create_graph=False)[0]
+
+                        for i, g in enumerate(grads_params):
+                            part = g.detach() * w
+                            agg_grads[i] = part if agg_grads[i] is None else (agg_grads[i] + part)
+
+                        grads_acts_cpu = grads_acts.detach().cpu()
                         with torch.no_grad():
                             preds = logits.argmax(dim=1)
                             correct = int((preds == labels).sum().item())
                             total = int(labels.numel())
+                        loss_val = float(loss.item())
                         losses.append(loss_val)
                         correct_sum += correct
                         total_sum += total
@@ -527,12 +546,19 @@ class SplitLearningServer:
                                     "total": total,
                                     "grads": _tensor_to_payload(grads_acts_cpu),
                                     "round_id": int(round_id),
-                                    "step_idx": int(step_idx),
-                                    "global_step": next_step,
+                                    "step_idx": int(next_step),
+                                    "global_step": int(self._global_step + 1),
                                     "sfl_variant": "v1",
                                 },
                             )
                         )
+
+                    # Write aggregated gradients into param.grad and do exactly ONE step.
+                    for p, g in zip(params, agg_grads):
+                        if g is None:
+                            continue
+                        p.grad = g
+                    self.optimizer.step()
 
                     self._global_step += 1
                     self.batch_count += expected
@@ -542,9 +568,10 @@ class SplitLearningServer:
                         avg_loss = sum(losses) / max(len(losses), 1)
                         acc = correct_sum / max(total_sum, 1)
                         self.logger.info(
-                            "[server:v1] steps=%d round=%d agg_update clients=%d avg_loss=%.4f acc=%.4f cpu=%.1f rss=%.1fMB dt=%.1fms",
+                            "[server:v1] steps=%d round=%d step_idx=%d agg_update clients=%d avg_loss=%.4f acc=%.4f cpu=%.1f rss=%.1fMB dt=%.1fms",
                             self._global_step,
                             round_id,
+                            next_step,
                             expected,
                             float(avg_loss),
                             float(acc),
@@ -564,81 +591,103 @@ class SplitLearningServer:
                         await ws.send(json.dumps(payload))
                     except Exception:
                         self.logger.debug("failed to send train_ack (v1)", exc_info=True)
+
+                # Step completed.
+                per_round.pop(next_step, None)
+                if not per_round:
+                    self._pending_v1_steps.pop(round_id, None)
+                self._v1_next_step[round_id] = next_step + 1
         finally:
             self._v1_processing[round_id] = False
 
     async def _process_v2_round(self, round_id: int) -> None:
         try:
+            expected = self._expected_clients()
             while True:
-                q = self._pending_v2.get(round_id)
-                if not q:
+                next_step = int(self._v2_next_step.get(round_id, 0))
+                per_round = self._pending_v2_steps.get(round_id) or {}
+                bucket = per_round.get(next_step)
+                if expected <= 0 or bucket is None or len(bucket) < expected:
                     break
-                seed = int(self.cfg.seed) + int(round_id) * 1000003 + int(self._global_step)
-                rng = random.Random(seed)
-                idx = rng.randrange(len(q))
-                client_id, step_idx, acts_payload, labels_payload, ws = q[idx]
-                del q[idx]
-                if len(q) == 0:
-                    self._pending_v2.pop(round_id, None)
 
-                async with self._step_lock:
-                    batch_t0 = time.perf_counter()
-                    acts = _payload_to_tensor(acts_payload).to(self.device)
-                    labels = _payload_to_tensor(labels_payload).to(self.device)
-                    self.model.train()
-                    acts.requires_grad_(True)
-                    self.optimizer.zero_grad(set_to_none=True)
-                    logits = self.model(acts)
-                    loss = self.criterion(logits, labels)
-                    loss.backward()
-                    self.optimizer.step()
+                # Synchronous receive barrier reached for this step.
+                client_ids = list(range(expected))
+                rng = random.Random(int(self.cfg.seed) + int(round_id) * 1000003 + int(next_step))
+                rng.shuffle(client_ids)
 
-                    grads_acts_cpu = acts.grad.detach().cpu()
-                    with torch.no_grad():
-                        preds = logits.argmax(dim=1)
-                        correct = int((preds == labels).sum().item())
-                        total = int(labels.numel())
+                for client_id in client_ids:
+                    item = bucket.get(int(client_id))
+                    if item is None:
+                        # Missing client input; stop and wait.
+                        return
+                    acts_payload, labels_payload, ws = item
 
-                    self.batch_count += 1
-                    self._global_step += 1
-                    cpu_pct, rss_mb = self._record_current_process_stats()
-                    if self.cfg.log_every > 0 and self.batch_count % self.cfg.log_every == 0:
-                        dt_ms = (time.perf_counter() - batch_t0) * 1000.0
-                        self.logger.info(
-                            "[server:v2] steps=%d round=%d client_id=%d loss=%.4f acc=%.4f cpu=%.1f rss=%.1fMB dt=%.1fms",
-                            self._global_step,
-                            round_id,
-                            int(client_id),
-                            float(loss.item()),
-                            correct / max(total, 1),
-                            cpu_pct,
-                            rss_mb,
-                            dt_ms,
+                    async with self._step_lock:
+                        batch_t0 = time.perf_counter()
+                        acts = _payload_to_tensor(acts_payload).to(self.device)
+                        labels = _payload_to_tensor(labels_payload).to(self.device)
+                        self.model.train()
+                        acts.requires_grad_(True)
+                        self.optimizer.zero_grad(set_to_none=True)
+                        logits = self.model(acts)
+                        loss = self.criterion(logits, labels)
+                        loss.backward()
+                        self.optimizer.step()
+
+                        grads_acts_cpu = acts.grad.detach().cpu()
+                        with torch.no_grad():
+                            preds = logits.argmax(dim=1)
+                            correct = int((preds == labels).sum().item())
+                            total = int(labels.numel())
+
+                        self.batch_count += 1
+                        self._global_step += 1
+                        cpu_pct, rss_mb = self._record_current_process_stats()
+                        if self.cfg.log_every > 0 and self.batch_count % self.cfg.log_every == 0:
+                            dt_ms = (time.perf_counter() - batch_t0) * 1000.0
+                            self.logger.info(
+                                "[server:v2] steps=%d round=%d step_idx=%d client_id=%d loss=%.4f acc=%.4f cpu=%.1f rss=%.1fMB dt=%.1fms",
+                                self._global_step,
+                                round_id,
+                                next_step,
+                                int(client_id),
+                                float(loss.item()),
+                                correct / max(total, 1),
+                                cpu_pct,
+                                rss_mb,
+                                dt_ms,
+                            )
+                            if self._mlflow_enabled and (self._mlflow is not None):
+                                try:
+                                    self._mlflow.log_metric("train_loss", float(loss.item()), step=int(self._global_step))
+                                    self._mlflow.log_metric("train_acc", correct / max(total, 1), step=int(self._global_step))
+                                except Exception:
+                                    pass
+
+                    try:
+                        await ws.send(
+                            json.dumps(
+                                {
+                                    "type": "train_ack",
+                                    "loss": float(loss.item()),
+                                    "correct": correct,
+                                    "total": total,
+                                    "grads": _tensor_to_payload(grads_acts_cpu),
+                                    "round_id": int(round_id),
+                                    "step_idx": int(next_step),
+                                    "global_step": int(self._global_step),
+                                    "sfl_variant": "v2",
+                                }
+                            )
                         )
-                        if self._mlflow_enabled and (self._mlflow is not None):
-                            try:
-                                self._mlflow.log_metric("train_loss", float(loss.item()), step=int(self._global_step))
-                                self._mlflow.log_metric("train_acc", correct / max(total, 1), step=int(self._global_step))
-                            except Exception:
-                                pass
+                    except Exception:
+                        self.logger.debug("failed to send train_ack (v2)", exc_info=True)
 
-                try:
-                    await ws.send(
-                        json.dumps(
-                            {
-                                "type": "train_ack",
-                                "loss": float(loss.item()),
-                                "correct": correct,
-                                "total": total,
-                                "grads": _tensor_to_payload(grads_acts_cpu),
-                                "round_id": round_id,
-                                "step_idx": step_idx,
-                                "sfl_variant": "v2",
-                            }
-                        )
-                    )
-                except Exception:
-                    self.logger.debug("failed to send train_ack (v2)", exc_info=True)
+                # Finished this synchronized step.
+                per_round.pop(next_step, None)
+                if not per_round:
+                    self._pending_v2_steps.pop(round_id, None)
+                self._v2_next_step[round_id] = next_step + 1
         finally:
             self._v2_processing[round_id] = False
 
@@ -670,13 +719,15 @@ class SplitLearningServer:
 
         self._ws_global_by_round[next_round] = self._copy_state_dict_cpu(self.model.state_dict())
         self._ws_global_hash_by_round[next_round] = self._hash_state_dict(self._ws_global_by_round[next_round])
+
         self._round_done.pop(round_id, None)
 
         # Best-effort cleanup.
-        self._pending_v1.pop(round_id, None)
-        self._pending_v2.pop(round_id, None)
-        self._v1_processing.pop(round_id, None)
+        self._pending_v1_steps.pop(round_id, None)
+        self._v1_next_step.pop(round_id, None)
+        self._pending_v2_steps.pop(round_id, None)
         self._v2_processing.pop(round_id, None)
+        self._v2_next_step.pop(round_id, None)
 
         await self._broadcast({"type": "server_round_ready", "round_id": next_round})
         self.logger.info("[server] server_round_ready round=%d", next_round)

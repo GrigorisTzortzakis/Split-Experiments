@@ -403,7 +403,13 @@ class SplitLearningClient:
         if self.args.max_batches and int(self.args.max_batches) > 0:
             steps_per_epoch = min(int(steps_per_epoch), int(self.args.max_batches))
 
-        # Round 0 starts from deterministic init; later rounds start from FedAvg weights.
+        # Paper-aligned: round 0 starts from WC_0 initialized by the fed_server.
+        wc0 = await self._fed_get_global_weights(fed_ws, round_id=0)
+        if wc0:
+            self.model.load_state_dict(wc0)
+            self.optimizer.state.clear()
+
+        # Later rounds start from FedAvg weights published by the fed_server.
         for round_id in range(num_rounds):
             if round_id > 0:
                 # Gate start of round r on BOTH barriers:
@@ -433,8 +439,17 @@ class SplitLearningClient:
 
                     self.optimizer.zero_grad(set_to_none=True)
                     acts = self.model(images)
-
                     step_idx = int(local_epoch) * int(steps_per_epoch) + int(batch_idx)
+
+                    # Algorithm 2: noise layer after cut layer (L).
+                    acts_to_send = acts
+                    act_noise_std = float(getattr(self.args, "activation_noise_std", 0.0) or 0.0)
+                    if act_noise_std > 0.0:
+                        gen = torch.Generator(device=self.device.type)
+                        gen.manual_seed(int(self.args.seed) + int(round_id) * 1000003 + int(step_idx))
+                        noise = torch.randn(acts_to_send.shape, device=acts_to_send.device, generator=gen) * act_noise_std
+                        acts_to_send = acts_to_send + noise
+
                     await split_ws.send(
                         json.dumps(
                             {
@@ -442,7 +457,7 @@ class SplitLearningClient:
                                 "client_id": int(self.args.client_id),
                                 "round_id": int(round_id),
                                 "step_idx": int(step_idx),
-                                "activations": _tensor_to_payload(acts.detach().cpu()),
+                                "activations": _tensor_to_payload(acts_to_send.detach().cpu()),
                                 "labels": _tensor_to_payload(labels_dev.detach().cpu()),
                             }
                         )
@@ -452,8 +467,12 @@ class SplitLearningClient:
                         raise RuntimeError(f"unexpected split server response: {resp}")
 
                     grads = _payload_to_tensor(resp["grads"]).to(self.device)
-                    acts.backward(grads)
-                    self.optimizer.step()
+
+                    if bool(getattr(self.args, "dp_enable", False)):
+                        self._dp_step(images, grads, round_id=int(round_id), step_idx=int(step_idx))
+                    else:
+                        acts.backward(grads)
+                        self.optimizer.step()
 
                     running_correct += int(resp.get("correct", 0))
                     running_total += int(resp.get("total", 0))
@@ -498,6 +517,68 @@ class SplitLearningClient:
             await self._fed_submit_update(fed_ws, round_id=round_id, nk=nk)
 
         self._record_resource_sample()
+
+    def _dp_step(self, images: torch.Tensor, upstream_grads: torch.Tensor, *, round_id: int, step_idx: int) -> None:
+        """DP-SGD style client update driven by upstream dL/dA from the server.
+
+        Uses per-example gradient clipping with norm C and adds Gaussian noise
+        with std = σ * C / batch_size.
+        """
+
+        clip_norm = float(getattr(self.args, "dp_clip_norm", 1.0) or 1.0)
+        noise_multiplier = float(getattr(self.args, "dp_noise_multiplier", 0.0) or 0.0)
+        if clip_norm <= 0:
+            raise ValueError("--dp-clip-norm must be > 0")
+
+        model = self.model
+        model.train()
+
+        try:
+            from torch.func import functional_call, grad, vmap
+        except Exception as exc:  # pragma: no cover
+            raise RuntimeError("torch.func is required for per-example DP gradients") from exc
+
+        params = {name: p for name, p in model.named_parameters()}
+        buffers = {name: b for name, b in model.named_buffers()}
+
+        def _single_sample_objective(p, b, x, g):
+            a = functional_call(model, (p, b), (x.unsqueeze(0),))
+            a = a.squeeze(0)
+            # Scalar surrogate whose gradient matches backprop with upstream gradient g.
+            return (a * g).sum()
+
+        per_sample_grads = vmap(grad(_single_sample_objective), in_dims=(None, None, 0, 0))(
+            params,
+            buffers,
+            images,
+            upstream_grads,
+        )
+
+        batch_size = int(images.shape[0])
+        sq = None
+        for g in per_sample_grads.values():
+            flat = g.reshape(batch_size, -1).to(dtype=torch.float32)
+            part = (flat * flat).sum(dim=1)
+            sq = part if sq is None else (sq + part)
+        assert sq is not None
+        norms = torch.sqrt(sq + 1e-12)
+        factors = torch.clamp(clip_norm / norms, max=1.0)
+
+        self.optimizer.zero_grad(set_to_none=True)
+        noise_std = noise_multiplier * clip_norm / float(max(batch_size, 1))
+        gen = torch.Generator(device=self.device.type)
+        gen.manual_seed(int(self.args.seed) + int(round_id) * 1000003 + int(step_idx) * 97 + 12345)
+
+        for name, p in model.named_parameters():
+            g = per_sample_grads[name]
+            view_shape = (batch_size,) + (1,) * (g.ndim - 1)
+            g_clipped = g * factors.view(view_shape)
+            g_avg = g_clipped.mean(dim=0)
+            if noise_std > 0:
+                g_avg = g_avg + torch.randn(g_avg.shape, device=g_avg.device, generator=gen) * noise_std
+            p.grad = g_avg.to(dtype=p.dtype)
+
+        self.optimizer.step()
 
     async def _wait_server_round_ready(self, round_id: int) -> None:
         # Wait until main server broadcasts server_round_ready for the given round.
@@ -587,6 +668,20 @@ class SplitLearningClient:
             if isinstance(state_b64, str) and state_b64:
                 return self._b64_to_state_dict(state_b64)
             return None
+
+    async def _fed_get_global_weights(self, fed_ws: WebSocketClientProtocol, *, round_id: int) -> Optional[Dict[str, Any]]:
+        # Request global client weights for a round (used for WC_0 at startup).
+        await fed_ws.send(json.dumps({"type": "get_global_client_weights", "round_id": int(round_id)}))
+        msg = await self._recv_fed_type({"global_client_weights", "error"})
+        if msg.get("type") != "global_client_weights":
+            return None
+        if int(msg.get("round_id", -1)) != int(round_id):
+            # Unexpected; fall back to waiting.
+            return await self._fed_wait_global_weights(fed_ws, round_id)
+        state_b64 = msg.get("state_b64")
+        if isinstance(state_b64, str) and state_b64:
+            return self._b64_to_state_dict(state_b64)
+        return None
 
     async def _fed_submit_update(self, fed_ws: WebSocketClientProtocol, *, round_id: int, nk: int) -> None:
         await fed_ws.send(
@@ -830,6 +925,31 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
         type=int,
         default=128,
         help="Maximum websocket frame size in MB",
+    )
+
+    # Algorithm 2 (DP + noise layer)
+    p.add_argument(
+        "--dp-enable",
+        action="store_true",
+        help="Enable DP client update: per-example clipping + Gaussian noise (Algorithm 2)",
+    )
+    p.add_argument(
+        "--dp-clip-norm",
+        type=float,
+        default=1.0,
+        help="Clipping norm C for per-example gradients",
+    )
+    p.add_argument(
+        "--dp-noise-multiplier",
+        type=float,
+        default=0.0,
+        help="Noise multiplier σ (noise std = σ*C/batch_size)",
+    )
+    p.add_argument(
+        "--activation-noise-std",
+        type=float,
+        default=0.0,
+        help="Stddev of the activation noise layer after the cut",
     )
     return p.parse_args(argv)
 

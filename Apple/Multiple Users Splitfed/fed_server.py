@@ -13,6 +13,8 @@ from typing import Any, Dict, Optional
 import torch
 import websockets
 
+from split_models import SplitClientNet
+
 
 def _state_dict_to_b64(state: Dict[str, torch.Tensor]) -> str:
     cpu_state = {str(k): v.detach().cpu() for k, v in state.items()}
@@ -62,6 +64,8 @@ class FedServerConfig:
     port: int
     expected_clients: int
     max_message_mb: int
+    cut_layer: int
+    seed: int
 
 
 class SplitFedServer:
@@ -71,10 +75,14 @@ class SplitFedServer:
 
         self._clients: Dict[int, websockets.WebSocketServerProtocol] = {}
 
-        # global client-front weights per round. By convention:
-        # - round 0 weights are empty (clients start from deterministic init)
-        # - after aggregating updates for round r, we publish weights for round r+1
+        # global client-front weights per round.
+        # Paper-aligned behavior: initialize WC_0 on the server and serve it to clients.
+        # After aggregating updates for round r, we publish weights for round r+1.
         self._wc_by_round: Dict[int, Dict[str, torch.Tensor]] = {}
+
+        torch.manual_seed(int(cfg.seed))
+        wc0_model = SplitClientNet(cut_layer=int(cfg.cut_layer))
+        self._wc_by_round[0] = {str(k): v.detach().cpu() for k, v in wc0_model.state_dict().items()}
 
         # round_id -> client_id -> (nk, state_dict) for updates *submitted for that round*
         self._round_updates: Dict[int, Dict[int, tuple[int, Dict[str, torch.Tensor]]]] = {}
@@ -175,6 +183,8 @@ def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
     p.add_argument("--port", type=int, default=8766)
     p.add_argument("--expected-clients", type=int, default=2)
     p.add_argument("--max-message-mb", type=int, default=128)
+    p.add_argument("--cut-layer", type=int, default=1, choices=(0, 1))
+    p.add_argument("--seed", type=int, default=17)
     return p.parse_args(argv)
 
 
@@ -200,6 +210,8 @@ def main(argv: Optional[list[str]] = None) -> None:
         port=args.port,
         expected_clients=args.expected_clients,
         max_message_mb=args.max_message_mb,
+        cut_layer=int(args.cut_layer),
+        seed=int(args.seed),
     )
     asyncio.run(_run(cfg, logger))
 
