@@ -1,0 +1,39 @@
+# syntax=docker/dockerfile:1
+FROM python:3.9-slim AS base
+
+WORKDIR /app
+
+# psutil may require compilation on linux/aarch64; install minimal build tooling.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc \
+    python3-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN pip install --no-cache-dir \
+    "numpy<2" \
+    torch==2.0.1 \
+    torchvision==0.15.2 \
+    websockets==11.0.3 \
+    psutil==5.9.5
+
+COPY split_models.py /app/
+COPY client.py /app/
+
+ENV DATA_DIR=/app/data
+
+CMD ["python", "client.py", \
+     "--host", "server", \
+     "--port", "8765", \
+     "--cut-layer", "1", \
+     "--device", "cpu", \
+     "--seed", "17", \
+     "--num-clients", "2", \
+     "--client-id", "0", \
+     "--num-epochs", "5", \
+     "--turn-batches", "1", \
+     "--batch-size", "100", \
+     "--learning-rate", "0.01", \
+     "--momentum", "0.0", \
+     "--num-workers", "0", \
+     "--log-every", "200", \
+     "--data-dir", "/app/data"]
