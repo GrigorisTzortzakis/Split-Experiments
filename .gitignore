@@ -1,0 +1,39 @@
+# OS junk
+.DS_Store
+
+# Python
+__pycache__/
+*.py[cod]
+*.so
+.venv/
+venv/
+.env/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Local tooling
+.vscode/
+.idea/
+
+# Split-Framework artifacts (keep code, ignore generated outputs)
+Split-Framework/datasets/downloads/
+Split-Framework/results/
+Split-Framework/saved_progress/
+Split-Framework/**/_server_outputs_tmp/
+
+# Common ML artifacts
+**/*.pt
+**/*.pth
+**/*.ckpt
+**/*.h5
+**/*.onnx
+
+# Logs and run traces
+**/*.log
+**/*.jsonl
+**/docker_stats.csv
+
+# Optional: ignore large local datasets if present elsewhere
+**/data/
+**/dataset/

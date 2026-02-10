@@ -1,0 +1,43 @@
+dataset: mnist
+device: gpu
+gpu_num_per_server: 1
+download: true
+batch_size: 64
+epochs: 30
+log_step: 10
+lr: 0.01
+max_rank: 3
+partition_method: base_on_class
+partition_alpha: 0.0
+variants_type: vanilla
+
+# Optimizer settings (SGD). If omitted, some algorithm variants hard-code values.
+# For the requested experiment: fixed lr=0.01, momentum=0.0, weight_decay=0.0.
+momentum: 0.0
+weight_decay: 0.0
+
+
+# Save a single experiment log file under ./results.
+log_save_path: ./results/run.log
+
+seed: 0
+server_rank: 0
+model: LeNet
+split_layer: 1
+thred: 0.10
+
+partition_method_attributes: 7
+class_number_per_client: 4
+
+client_split: [3,5]
+data_vertical_list: [6, 4, 4]
+cut_layer_vertical_list: [4, 3, 3]
+SGLR_splitAvg_active: 0.5
+SGLR_splitLR: True
+SGLR_splitLR_alpha: 0.5
+#log_save_path: D:\Split-learning-Attacks\SABuf\Split-learning-Attacks\SLFrame\log.txt
+
+
+save_acts_step: 0
+save_attack_acts_step: 0
+save_model_epoch: 50
