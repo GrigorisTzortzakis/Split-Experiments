@@ -16,9 +16,8 @@ venv/
 .vscode/
 .idea/
 
-# Split-Framework artifacts (keep code, ignore generated outputs)
+# Split-Framework artifacts (keep code, ignore bulky generated outputs)
 Split-Framework/datasets/downloads/
-Split-Framework/results/
 Split-Framework/saved_progress/
 Split-Framework/**/_server_outputs_tmp/
 
@@ -33,6 +32,11 @@ Split-Framework/**/_server_outputs_tmp/
 **/*.log
 **/*.jsonl
 **/docker_stats.csv
+
+# Keep small Split-Framework run logs under version control
+!Split-Framework/results/
+!Split-Framework/results/**/
+!Split-Framework/results/**/*.log
 
 # Optional: ignore large local datasets if present elsewhere
 **/data/
