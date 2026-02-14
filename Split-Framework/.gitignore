@@ -1,0 +1,15 @@
+# Generated experiment artifacts (paths relative to this folder)
+results/logs/
+results/plots/
+
+# Common outputs under results
+results/**/*.png
+results/**/*.log
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# macOS
+.DS_Store
