@@ -178,27 +178,65 @@ def main():
             )
 
     # 2b. Build a per-run log filename using current settings.
-    # Example: 1client_lenet_2epochs_24-01-2026_12-36.log
+    # Examples:
+    #   5client_lenet_50epochs_homo_09-02-2026_14-02.log
+    #   10client_lenet_50epochs_hetero_a0.1_11-02-2026_14-45.log
+    #   5client_lenet_50epochs_alpha0_11-02-2026_12-16.log
     # Use a shared run_id (broadcast from rank 0) so all ranks write to the same file.
     client_number = args["max_rank"]
     model_name = str(args["model"] or "model").lower()
     epochs = args["epochs"]
     variant_name = str(args["variants_type"] or "default").lower()
-    results_dir = PROJECT_ROOT / "results" / variant_name
+    try:
+        partition_method_raw = args["partition_method"]
+    except Exception:
+        partition_method_raw = None
+    partition_method = str(partition_method_raw or "homo").lower()
+
+    try:
+        partition_alpha = args["partition_alpha"]
+    except Exception:
+        partition_alpha = None
+
+    try:
+        partition_client_number = args["partition_client_number"]
+    except Exception:
+        partition_client_number = None
+
+    if partition_method == "hetero":
+        if partition_alpha is None:
+            partition_tag = "hetero"
+        else:
+            partition_tag = f"hetero_a{float(partition_alpha):g}"
+    elif partition_method in ("alpha0", "a0"):
+        partition_tag = "alpha0"
+    else:
+        partition_tag = partition_method
+
+    # If partitions are decoupled from active MPI clients, encode it in the log name.
+    if partition_client_number is not None and int(partition_client_number) != int(client_number):
+        partition_tag = f"{partition_tag}_pc{int(partition_client_number)}"
+
+    # Store logs under results/logs/<variant>-<model>/ so different variants/models don't mix.
+    # Example folder: results/logs/vanilla-lenet/
+    variant_model_dir = f"{variant_name}-{model_name}"
+    results_dir = PROJECT_ROOT / "results" / "logs" / variant_model_dir
     os.makedirs(results_dir, exist_ok=True)
 
     if process_id == 0:
         base_run_id = datetime.now().strftime("%d-%m-%Y_%H-%M")
         run_id = base_run_id
         suffix = 1
-        while (results_dir / f"{client_number}client_{model_name}_{epochs}epochs_{run_id}.log").exists():
+        while (results_dir / f"{client_number}client_{model_name}_{epochs}epochs_{partition_tag}_{run_id}.log").exists():
             run_id = f"{base_run_id}_{suffix}"
             suffix += 1
     else:
         run_id = None
     run_id = comm.bcast(run_id, root=0)
 
-    args["log_save_path"] = str(results_dir / f"{client_number}client_{model_name}_{epochs}epochs_{run_id}.log")
+    args["log_save_path"] = str(
+        results_dir / f"{client_number}client_{model_name}_{epochs}epochs_{partition_tag}_{run_id}.log"
+    )
     
     # 3. Create model (client & server parts)
     variant_name_raw = str(args["variants_type"] or "").lower()

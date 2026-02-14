@@ -23,6 +23,7 @@ from typing import Callable, Dict, List, Optional
 
 import torch
 from mpi4py import MPI
+from collections import defaultdict
 
 
 class Message(object):
@@ -58,13 +59,60 @@ class Message(object):
         self.receiver_id = self.msg_params[Message.MSG_ARG_KEY_RECEIVER]
 
     def get_size(self):
-        total = 0
-        for v in self.msg_params.values():
-            if isinstance(v, torch.Tensor):
-                total += sys.getsizeof(v.storage())
-            else:
-                total += sys.getsizeof(str(v))
-        return total
+        """Best-effort payload size estimate in bytes.
+
+        Notes:
+        - MPI uses Python pickling for `comm.send`, so the *true* serialized size
+          can differ. This estimator is designed to be consistent and to
+          correctly account for tensors nested in dicts/tuples/lists.
+        - Tensors are counted by `numel * element_size` (not Python object
+          overhead).
+        """
+
+        def _tensor_nbytes(t: torch.Tensor) -> int:
+            try:
+                return int(t.nelement() * t.element_size())
+            except Exception:
+                try:
+                    return int(t.numel() * t.element_size())
+                except Exception:
+                    return 0
+
+        def _estimate(obj) -> int:
+            if obj is None:
+                return 0
+            if isinstance(obj, torch.Tensor):
+                return _tensor_nbytes(obj)
+            if isinstance(obj, (bytes, bytearray, memoryview)):
+                return len(obj)
+            if isinstance(obj, str):
+                return len(obj.encode("utf-8", errors="replace"))
+            if isinstance(obj, (int, float, bool)):
+                return sys.getsizeof(obj)
+            if isinstance(obj, dict):
+                # Count both keys and values.
+                return sum(_estimate(k) + _estimate(v) for k, v in obj.items())
+            if isinstance(obj, (list, tuple, set)):
+                return sum(_estimate(v) for v in obj)
+            # Fallback: object header + string repr
+            try:
+                return sys.getsizeof(obj)
+            except Exception:
+                return sys.getsizeof(str(obj))
+
+        return int(sum(_estimate(v) for v in self.msg_params.values()))
+
+    def get_comm_category(self) -> str:
+        """Heuristic category for message-size breakdown."""
+        keys = set(self.msg_params.keys())
+        if "activation_grads" in keys:
+            return "GRADS"
+        if "activations" in keys:
+            return "ACTS"
+        # Common model payload keys across algorithms.
+        if "model_state_dict" in keys or "model" in keys or "model_params" in keys:
+            return "MODEL"
+        return "OTHER"
 
     def get_sender_id(self):
         return self.sender_id
@@ -119,6 +167,10 @@ class MPISendThread(threading.Thread):
         self.q = q
         self.total_send_size = 0
         self.tmp_send_size = 0
+        self.total_send_size_by_type = defaultdict(int)
+        self.tmp_send_size_by_type = defaultdict(int)
+        self.total_send_size_by_category = defaultdict(int)
+        self.tmp_send_size_by_category = defaultdict(int)
 
     def run(self):
         logging.info("Starting " + self.name + ". Process ID = " + str(self.rank))
@@ -128,8 +180,14 @@ class MPISendThread(threading.Thread):
                     msg = self.q.get()
                     msg_str = msg.to_string()
                     size = msg.get_size()
+                    msg_type = msg.get_type()
+                    msg_cat = msg.get_comm_category()
                     self.tmp_send_size += size
                     self.total_send_size += size
+                    self.tmp_send_size_by_type[msg_type] += size
+                    self.total_send_size_by_type[msg_type] += size
+                    self.tmp_send_size_by_category[msg_cat] += size
+                    self.total_send_size_by_category[msg_cat] += size
                     dest_id = msg.get(Message.MSG_ARG_KEY_RECEIVER)
                     self.comm.send(msg_str, dest=dest_id)
                 else:
@@ -171,6 +229,10 @@ class MPIReceiveThread(threading.Thread):
         self.name = name
         self.total_receive_size = 0
         self.tmp_receive_size = 0
+        self.total_receive_size_by_type = defaultdict(int)
+        self.tmp_receive_size_by_type = defaultdict(int)
+        self.total_receive_size_by_category = defaultdict(int)
+        self.tmp_receive_size_by_category = defaultdict(int)
         self.q = q
 
     def run(self):
@@ -188,8 +250,14 @@ class MPIReceiveThread(threading.Thread):
                 msg.init(msg_str)
                 self.q.put(msg)
                 size = msg.get_size()
+                msg_type = msg.get_type()
+                msg_cat = msg.get_comm_category()
                 self.tmp_receive_size += size
                 self.total_receive_size += size
+                self.tmp_receive_size_by_type[msg_type] += size
+                self.total_receive_size_by_type[msg_type] += size
+                self.tmp_receive_size_by_category[msg_cat] += size
+                self.total_receive_size_by_category[msg_cat] += size
             except SystemExit:
                 break
             except Exception:
@@ -269,6 +337,48 @@ class MpiCommunicationManager:
     def reset_analysis_data(self):
         self.send_thread.tmp_send_size = 0
         self.receive_thread.tmp_receive_size = 0
+        # Reset per-type and per-category rolling (tmp) counters.
+        if hasattr(self.send_thread, "tmp_send_size_by_type"):
+            self.send_thread.tmp_send_size_by_type = defaultdict(int)
+        if hasattr(self.send_thread, "tmp_send_size_by_category"):
+            self.send_thread.tmp_send_size_by_category = defaultdict(int)
+        if hasattr(self.receive_thread, "tmp_receive_size_by_type"):
+            self.receive_thread.tmp_receive_size_by_type = defaultdict(int)
+        if hasattr(self.receive_thread, "tmp_receive_size_by_category"):
+            self.receive_thread.tmp_receive_size_by_category = defaultdict(int)
+
+    # Backwards-compatible aliases (some algorithms expect these on `com_manager`).
+    @property
+    def tmp_send_size(self) -> int:
+        return int(getattr(self.send_thread, "tmp_send_size", 0))
+
+    @property
+    def tmp_receive_size(self) -> int:
+        return int(getattr(self.receive_thread, "tmp_receive_size", 0))
+
+    @property
+    def total_send_size(self) -> int:
+        return int(getattr(self.send_thread, "total_send_size", 0))
+
+    @property
+    def total_receive_size(self) -> int:
+        return int(getattr(self.receive_thread, "total_receive_size", 0))
+
+    @property
+    def total_send_size_by_type(self):
+        return getattr(self.send_thread, "total_send_size_by_type", {})
+
+    @property
+    def total_receive_size_by_type(self):
+        return getattr(self.receive_thread, "total_receive_size_by_type", {})
+
+    @property
+    def total_send_size_by_category(self):
+        return getattr(self.send_thread, "total_send_size_by_category", {})
+
+    @property
+    def total_receive_size_by_category(self):
+        return getattr(self.receive_thread, "total_receive_size_by_category", {})
 
     def send_message(self, msg: Message, priority=100):
         msg.add_params(Message.MSG_ARG_KEY_RECEIVE_PRIORITY, priority)
@@ -365,11 +475,36 @@ class MessageManager(Observer):
         self._message_handlers: Dict[int, Callable] = {}
         self._is_finished = False
 
+        # Ensure comm breakdown is written into the experiment log file.
+        try:
+            from runtime.log import Log
+
+            self._comm_log = Log("CommBreakdown", args)
+        except Exception:
+            self._comm_log = None
+
         if backend != "MPI":
             raise ValueError(f"Unsupported backend: {backend}")
 
+        # Minimal per-msg_type accounting at the single choke points where all
+        # messages pass through (send_message/receive_message).
+        self.bytes_sent_by_type = defaultdict(int)
+        self.bytes_received_by_type = defaultdict(int)
+
         self.com_manager = MpiCommunicationManager(comm, rank, size, node_type=node_type)
         self.com_manager.add_observer(self)
+
+    def _safe_msg_type_and_size(self, message) -> Tuple[Optional[int], int]:
+        """Best-effort extraction of (msg_type, size_bytes) without raising."""
+        try:
+            msg_type = message.get_type() if hasattr(message, "get_type") else None
+        except Exception:
+            msg_type = None
+        try:
+            size = int(message.get_size()) if hasattr(message, "get_size") else 0
+        except Exception:
+            size = 0
+        return msg_type, size
 
     def register_message_receive_handlers(self):
         return
@@ -378,6 +513,13 @@ class MessageManager(Observer):
         self._message_handlers[msg_type] = handler
 
     def receive_message(self, msg_type, msg_params):
+        # Per-msg_type byte accounting (receive side) at the central dispatch point.
+        try:
+            _msg_type, size = self._safe_msg_type_and_size(msg_params)
+            self.bytes_received_by_type[msg_type] += int(size)
+        except Exception:
+            pass
+
         handler = self._message_handlers.get(msg_type)
         if handler is None:
             logging.debug("No handler for msg_type=%s on rank=%s", msg_type, self.rank)
@@ -385,6 +527,14 @@ class MessageManager(Observer):
         handler(msg_params)
 
     def send_message(self, message, priority: Optional[int] = None):
+        # Per-msg_type byte accounting (send side) at the central send entrypoint.
+        try:
+            msg_type, size = self._safe_msg_type_and_size(message)
+            if msg_type is not None:
+                self.bytes_sent_by_type[msg_type] += int(size)
+        except Exception:
+            pass
+
         if priority is None:
             self.com_manager.send_message(message)
         else:
@@ -398,4 +548,43 @@ class MessageManager(Observer):
         if self._is_finished:
             return
         self._is_finished = True
+
+        # Log a final breakdown before shutting down threads.
+        try:
+            self.com_manager.flush_sends(timeout=5.0)
+
+            def _sorted_nonzero(d):
+                try:
+                    items = [(k, int(v)) for k, v in dict(d).items() if int(v) != 0]
+                except Exception:
+                    return {}
+                items.sort(key=lambda kv: (-kv[1], str(kv[0])))
+                return {k: v for k, v in items}
+
+            send_by_cat = _sorted_nonzero(getattr(self.com_manager, "total_send_size_by_category", {}))
+            recv_by_cat = _sorted_nonzero(getattr(self.com_manager, "total_receive_size_by_category", {}))
+            send_by_type = _sorted_nonzero(getattr(self.com_manager, "total_send_size_by_type", {}))
+            recv_by_type = _sorted_nonzero(getattr(self.com_manager, "total_receive_size_by_type", {}))
+            mm_send_by_type = _sorted_nonzero(getattr(self, "bytes_sent_by_type", {}))
+            mm_recv_by_type = _sorted_nonzero(getattr(self, "bytes_received_by_type", {}))
+            total_send = int(getattr(self.com_manager, "total_send_size", 0))
+            total_recv = int(getattr(self.com_manager, "total_receive_size", 0))
+
+            if self._comm_log is not None:
+                self._comm_log.info(
+                    "rank={} node_type={} total_send={} total_receive={} send_by_category={} recv_by_category={} send_by_type={} recv_by_type={} mm_send_by_type={} mm_recv_by_type={}".format(
+                        self.rank,
+                        self.node_type,
+                        total_send,
+                        total_recv,
+                        send_by_cat,
+                        recv_by_cat,
+                        send_by_type,
+                        recv_by_type,
+                        mm_send_by_type,
+                        mm_recv_by_type,
+                    )
+                )
+        except Exception:
+            pass
         self.com_manager.stop_receive_message()

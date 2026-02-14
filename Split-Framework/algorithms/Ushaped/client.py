@@ -106,7 +106,20 @@ class SplitNNClient():
         self.train_mode()
 
     def print_com_size(self, com_manager):
-        self.log.info("worker_num={} epoch_send={} epoch_receive={} total_send={} total_receive={}"
-                      .format(self.rank, com_manager.send_thread.tmp_send_size,
-                              com_manager.receive_thread.tmp_receive_size,
-                              com_manager.send_thread.total_send_size, com_manager.receive_thread.total_receive_size))
+        send_by_cat = dict(getattr(com_manager, "total_send_size_by_category", {}))
+        recv_by_cat = dict(getattr(com_manager, "total_receive_size_by_category", {}))
+        send_by_type = dict(getattr(com_manager, "total_send_size_by_type", {}))
+        recv_by_type = dict(getattr(com_manager, "total_receive_size_by_type", {}))
+        self.log.info(
+            "worker_num={} epoch_send={} epoch_receive={} total_send={} total_receive={} send_by_category={} recv_by_category={} send_by_type={} recv_by_type={}".format(
+                self.rank,
+                com_manager.send_thread.tmp_send_size,
+                com_manager.receive_thread.tmp_receive_size,
+                com_manager.send_thread.total_send_size,
+                com_manager.receive_thread.total_receive_size,
+                send_by_cat,
+                recv_by_cat,
+                send_by_type,
+                recv_by_type,
+            )
+        )
