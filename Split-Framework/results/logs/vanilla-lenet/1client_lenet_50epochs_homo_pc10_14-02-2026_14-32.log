@@ -1,0 +1,371 @@
+2026-02-14 14:32:22,275 - datasetFactory - INFO - 16208 - mnist
+2026-02-14 14:32:22,275 - datasetFactory - INFO - 17416 - mnist
+2026-02-14 14:32:22,275 - TorchvisionDatasetController - INFO - 16208 - <bound method DataPartitioner.homo of <datasets.Partition_Data.DataPartitioner object at 0x0000025F73BDBFD0>>
+2026-02-14 14:32:22,275 - DataPartitioner - INFO - 16208 - homo
+2026-02-14 14:32:22,275 - TorchvisionDatasetController - INFO - 16208 - C:\Users\User\Documents\phd\Split-Experiments\Split-Framework\datasets\downloads
+2026-02-14 14:32:22,275 - TorchvisionDatasetController - INFO - 17416 - <bound method DataPartitioner.homo of <datasets.Partition_Data.DataPartitioner object at 0x00000228FF007AD0>>
+2026-02-14 14:32:22,275 - DataPartitioner - INFO - 17416 - homo
+2026-02-14 14:32:22,275 - TorchvisionDatasetController - INFO - 17416 - C:\Users\User\Documents\phd\Split-Experiments\Split-Framework\datasets\downloads
+2026-02-14 14:32:22,328 - TorchvisionDatasetController - INFO - 16208 - rank = 1, local_sample_number = 6000
+2026-02-14 14:32:22,373 - TorchvisionDatasetController - INFO - 17416 - train_dl_global number = 468
+2026-02-14 14:32:22,373 - TorchvisionDatasetController - INFO - 17416 - test_dl_global number = 79
+2026-02-14 14:32:22,377 - main - INFO - 17416 - Process 0 initialized with device: cpu
+2026-02-14 14:32:22,377 - SplitNN_distributed - INFO - 17416 - process_id == server_rank : 0
+2026-02-14 14:32:22,377 - TorchvisionDatasetController - INFO - 16208 - process_id = 1, batch_num_train_local = 46, batch_num_test_local = 79
+2026-02-14 14:32:22,381 - main - INFO - 16208 - Process 1 initialized with device: cpu
+2026-02-14 14:32:22,381 - SplitNN_distributed - INFO - 16208 - process_id == client_rank : 1
+2026-02-14 14:32:22,383 - init_server - INFO - 17416 - Server run begin vanilla
+2026-02-14 14:32:22,388 - init_client - INFO - 16208 - Client 1 run begin
+2026-02-14 14:32:22,446 - SplitNNServer - INFO - 17416 - phase=train acc=0.125 loss=2.45044207572937 epoch=0 and step=0
+2026-02-14 14:32:23,175 - SplitNNServer - INFO - 17416 - phase=train acc=0.3259943181818182 loss=1.7922831773757935 epoch=0 and step=10
+2026-02-14 14:32:23,844 - SplitNNServer - INFO - 17416 - phase=train acc=0.5215773809523809 loss=0.7307624816894531 epoch=0 and step=20
+2026-02-14 14:32:24,484 - SplitNNServer - INFO - 17416 - phase=train acc=0.6176915322580645 loss=0.3973379135131836 epoch=0 and step=30
+2026-02-14 14:32:25,132 - SplitNNServer - INFO - 17416 - phase=train acc=0.6764481707317073 loss=0.39284512400627136 epoch=0 and step=40
+2026-02-14 14:32:25,489 - SplitNNClient - INFO - 16208 - worker_num=1 epoch_send=67882016 epoch_receive=67834912 total_send=67882016 total_receive=67834912 send_by_category={'ACTS': 67882016} recv_by_category={'GRADS': 67834912} send_by_type={2: 67882016} recv_by_type={1: 67834912}
+2026-02-14 14:32:27,017 - SplitNNServer - INFO - 17416 - phase=validation acc=0.9191 loss=0.26611988274734233 epoch=0 and step=79
+2026-02-14 14:32:30,093 - SplitNNServer - INFO - 17416 - phase=train acc=0.921875 loss=0.29060062766075134 epoch=1 and step=0
+2026-02-14 14:32:30,754 - SplitNNServer - INFO - 17416 - phase=train acc=0.9204545454545454 loss=0.19271305203437805 epoch=1 and step=10
+2026-02-14 14:32:31,587 - SplitNNServer - INFO - 17416 - phase=train acc=0.9274553571428571 loss=0.2577791213989258 epoch=1 and step=20
+2026-02-14 14:32:32,360 - SplitNNServer - INFO - 17416 - phase=train acc=0.9284274193548387 loss=0.24526523053646088 epoch=1 and step=30
+2026-02-14 14:32:33,091 - SplitNNServer - INFO - 17416 - phase=train acc=0.9344512195121951 loss=0.1436767876148224 epoch=1 and step=40
+2026-02-14 14:32:33,542 - SplitNNClient - INFO - 16208 - worker_num=1 epoch_send=251055538 epoch_receive=135672146 total_send=251055538 total_receive=135672146 send_by_category={'ACTS': 251052880, 'MODEL': 2210, 'OTHER': 448} recv_by_category={'GRADS': 135669824, 'OTHER': 112, 'MODEL': 2210} send_by_type={2: 251052880, 7: 2210, 3: 112, 4: 112, 6: 112, 10: 112} recv_by_type={1: 135669824, 6: 112, 8: 2210}
+2026-02-14 14:32:35,061 - SplitNNServer - INFO - 17416 - phase=validation acc=0.954 loss=0.1525113137462471 epoch=1 and step=79
+2026-02-14 14:32:38,170 - SplitNNServer - INFO - 17416 - phase=train acc=0.9921875 loss=0.04271480068564415 epoch=2 and step=0
+2026-02-14 14:32:38,807 - SplitNNServer - INFO - 17416 - phase=train acc=0.9680397727272727 loss=0.08466657251119614 epoch=2 and step=10
+2026-02-14 14:32:39,449 - SplitNNServer - INFO - 17416 - phase=train acc=0.9661458333333334 loss=0.07053107768297195 epoch=2 and step=20
+2026-02-14 14:32:40,083 - SplitNNServer - INFO - 17416 - phase=train acc=0.9657258064516129 loss=0.0941660925745964 epoch=2 and step=30
+2026-02-14 14:32:40,717 - SplitNNServer - INFO - 17416 - phase=train acc=0.9630335365853658 loss=0.08435250073671341 epoch=2 and step=40
+2026-02-14 14:32:41,202 - SplitNNClient - INFO - 16208 - worker_num=1 epoch_send=434229060 epoch_receive=203509380 total_send=434229060 total_receive=203509380 send_by_category={'ACTS': 434223744, 'MODEL': 4420, 'OTHER': 896} recv_by_category={'GRADS': 203504736, 'OTHER': 224, 'MODEL': 4420} send_by_type={2: 434223744, 7: 4420, 3: 224, 4: 224, 6: 224, 10: 224} recv_by_type={1: 203504736, 6: 224, 8: 4420}
+2026-02-14 14:32:42,700 - SplitNNServer - INFO - 17416 - phase=validation acc=0.9637 loss=0.1206300703107226 epoch=2 and step=79
+2026-02-14 14:32:45,761 - SplitNNServer - INFO - 17416 - phase=train acc=0.984375 loss=0.07048838585615158 epoch=3 and step=0
+2026-02-14 14:32:46,653 - SplitNNServer - INFO - 17416 - phase=train acc=0.9708806818181818 loss=0.04978622868657112 epoch=3 and step=10
+2026-02-14 14:32:47,475 - SplitNNServer - INFO - 17416 - phase=train acc=0.9706101190476191 loss=0.10183952748775482 epoch=3 and step=20
+2026-02-14 14:32:48,179 - SplitNNServer - INFO - 17416 - phase=train acc=0.9717741935483871 loss=0.028160443529486656 epoch=3 and step=30
+2026-02-14 14:32:48,955 - SplitNNServer - INFO - 17416 - phase=train acc=0.9740853658536586 loss=0.051659874618053436 epoch=3 and step=40
+2026-02-14 14:32:49,438 - SplitNNClient - INFO - 16208 - worker_num=1 epoch_send=617402582 epoch_receive=271346614 total_send=617402582 total_receive=271346614 send_by_category={'ACTS': 617394608, 'MODEL': 6630, 'OTHER': 1344} recv_by_category={'GRADS': 271339648, 'OTHER': 336, 'MODEL': 6630} send_by_type={2: 617394608, 7: 6630, 3: 336, 4: 336, 6: 336, 10: 336} recv_by_type={1: 271339648, 6: 336, 8: 6630}
+2026-02-14 14:32:50,946 - SplitNNServer - INFO - 17416 - phase=validation acc=0.9632 loss=0.11458707337350219 epoch=3 and step=79
+2026-02-14 14:32:54,030 - SplitNNServer - INFO - 17416 - phase=train acc=0.9609375 loss=0.11126366257667542 epoch=4 and step=0
+2026-02-14 14:32:54,793 - SplitNNServer - INFO - 17416 - phase=train acc=0.9822443181818182 loss=0.08871378749608994 epoch=4 and step=10
+2026-02-14 14:32:55,429 - SplitNNServer - INFO - 17416 - phase=train acc=0.9806547619047619 loss=0.048851050436496735 epoch=4 and step=20
+2026-02-14 14:32:56,139 - SplitNNServer - INFO - 17416 - phase=train acc=0.9810987903225806 loss=0.04591002315282822 epoch=4 and step=30
+2026-02-14 14:32:56,961 - SplitNNServer - INFO - 17416 - phase=train acc=0.9811356707317073 loss=0.05594196543097496 epoch=4 and step=40
+2026-02-14 14:32:57,449 - SplitNNClient - INFO - 16208 - worker_num=1 epoch_send=800576104 epoch_receive=339183848 total_send=800576104 total_receive=339183848 send_by_category={'ACTS': 800565472, 'MODEL': 8840, 'OTHER': 1792} recv_by_category={'GRADS': 339174560, 'OTHER': 448, 'MODEL': 8840} send_by_type={2: 800565472, 7: 8840, 3: 448, 4: 448, 6: 448, 10: 448} recv_by_type={1: 339174560, 6: 448, 8: 8840}
+2026-02-14 14:32:58,958 - SplitNNServer - INFO - 17416 - phase=validation acc=0.9713 loss=0.08890767817907154 epoch=4 and step=79
+2026-02-14 14:33:02,078 - SplitNNServer - INFO - 17416 - phase=train acc=0.984375 loss=0.04687386751174927 epoch=5 and step=0
+2026-02-14 14:33:02,711 - SplitNNServer - INFO - 17416 - phase=train acc=0.9928977272727273 loss=0.04619007185101509 epoch=5 and step=10
+2026-02-14 14:33:03,365 - SplitNNServer - INFO - 17416 - phase=train acc=0.9862351190476191 loss=0.05320373550057411 epoch=5 and step=20
+2026-02-14 14:33:04,125 - SplitNNServer - INFO - 17416 - phase=train acc=0.9876512096774194 loss=0.024766607210040092 epoch=5 and step=30
+2026-02-14 14:33:04,951 - SplitNNServer - INFO - 17416 - phase=train acc=0.987233231707317 loss=0.03927215561270714 epoch=5 and step=40
+2026-02-14 14:33:05,439 - SplitNNClient - INFO - 16208 - worker_num=1 epoch_send=983749626 epoch_receive=407021082 total_send=983749626 total_receive=407021082 send_by_category={'ACTS': 983736336, 'MODEL': 11050, 'OTHER': 2240} recv_by_category={'GRADS': 407009472, 'OTHER': 560, 'MODEL': 11050} send_by_type={2: 983736336, 7: 11050, 3: 560, 4: 560, 6: 560, 10: 560} recv_by_type={1: 407009472, 6: 560, 8: 11050}
+2026-02-14 14:33:07,007 - SplitNNServer - INFO - 17416 - phase=validation acc=0.9691 loss=0.10653464821951251 epoch=5 and step=79
+2026-02-14 14:33:10,057 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.05244951695203781 epoch=6 and step=0
+2026-02-14 14:33:10,852 - SplitNNServer - INFO - 17416 - phase=train acc=0.9893465909090909 loss=0.03994432091712952 epoch=6 and step=10
+2026-02-14 14:33:11,488 - SplitNNServer - INFO - 17416 - phase=train acc=0.9899553571428571 loss=0.03850623592734337 epoch=6 and step=20
+2026-02-14 14:33:12,247 - SplitNNServer - INFO - 17416 - phase=train acc=0.9894153225806451 loss=0.025304723531007767 epoch=6 and step=30
+2026-02-14 14:33:13,111 - SplitNNServer - INFO - 17416 - phase=train acc=0.9902820121951219 loss=0.03671440854668617 epoch=6 and step=40
+2026-02-14 14:33:13,568 - SplitNNClient - INFO - 16208 - worker_num=1 epoch_send=1166923148 epoch_receive=474858316 total_send=1166923148 total_receive=474858316 send_by_category={'ACTS': 1166907200, 'MODEL': 13260, 'OTHER': 2688} recv_by_category={'GRADS': 474844384, 'OTHER': 672, 'MODEL': 13260} send_by_type={2: 1166907200, 7: 13260, 3: 672, 4: 672, 6: 672, 10: 672} recv_by_type={1: 474844384, 6: 672, 8: 13260}
+2026-02-14 14:33:15,157 - SplitNNServer - INFO - 17416 - phase=validation acc=0.9705 loss=0.10311859893270686 epoch=6 and step=79
+2026-02-14 14:33:18,244 - SplitNNServer - INFO - 17416 - phase=train acc=0.984375 loss=0.027669483795762062 epoch=7 and step=0
+2026-02-14 14:33:19,128 - SplitNNServer - INFO - 17416 - phase=train acc=0.9943181818181818 loss=0.02518288791179657 epoch=7 and step=10
+2026-02-14 14:33:19,826 - SplitNNServer - INFO - 17416 - phase=train acc=0.9914434523809523 loss=0.02240268886089325 epoch=7 and step=20
+2026-02-14 14:33:20,590 - SplitNNServer - INFO - 17416 - phase=train acc=0.9914314516129032 loss=0.0200835969299078 epoch=7 and step=30
+2026-02-14 14:33:21,260 - SplitNNServer - INFO - 17416 - phase=train acc=0.9908536585365854 loss=0.025690220296382904 epoch=7 and step=40
+2026-02-14 14:33:21,598 - SplitNNClient - INFO - 16208 - worker_num=1 epoch_send=1350096670 epoch_receive=542695550 total_send=1350096670 total_receive=542695550 send_by_category={'ACTS': 1350078064, 'MODEL': 15470, 'OTHER': 3136} recv_by_category={'GRADS': 542679296, 'OTHER': 784, 'MODEL': 15470} send_by_type={2: 1350078064, 7: 15470, 3: 784, 4: 784, 6: 784, 10: 784} recv_by_type={1: 542679296, 6: 784, 8: 15470}
+2026-02-14 14:33:23,085 - SplitNNServer - INFO - 17416 - phase=validation acc=0.9727 loss=0.0864038911236957 epoch=7 and step=79
+2026-02-14 14:33:26,173 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.02136460691690445 epoch=8 and step=0
+2026-02-14 14:33:26,815 - SplitNNServer - INFO - 17416 - phase=train acc=0.9964488636363636 loss=0.014104935340583324 epoch=8 and step=10
+2026-02-14 14:33:27,557 - SplitNNServer - INFO - 17416 - phase=train acc=0.9970238095238095 loss=0.013440842740237713 epoch=8 and step=20
+2026-02-14 14:33:28,380 - SplitNNServer - INFO - 17416 - phase=train acc=0.9954637096774194 loss=0.00833474937826395 epoch=8 and step=30
+2026-02-14 14:33:29,297 - SplitNNServer - INFO - 17416 - phase=train acc=0.9952362804878049 loss=0.017525689676404 epoch=8 and step=40
+2026-02-14 14:33:29,819 - SplitNNClient - INFO - 16208 - worker_num=1 epoch_send=1533270192 epoch_receive=610532784 total_send=1533270192 total_receive=610532784 send_by_category={'ACTS': 1533248928, 'MODEL': 17680, 'OTHER': 3584} recv_by_category={'GRADS': 610514208, 'OTHER': 896, 'MODEL': 17680} send_by_type={2: 1533248928, 7: 17680, 3: 896, 4: 896, 6: 896, 10: 896} recv_by_type={1: 610514208, 6: 896, 8: 17680}
+2026-02-14 14:33:31,343 - SplitNNServer - INFO - 17416 - phase=validation acc=0.9677 loss=0.10727873060976073 epoch=8 and step=79
+2026-02-14 14:33:34,458 - SplitNNServer - INFO - 17416 - phase=train acc=0.9921875 loss=0.01895921118557453 epoch=9 and step=0
+2026-02-14 14:33:35,232 - SplitNNServer - INFO - 17416 - phase=train acc=0.9943181818181818 loss=0.015619225800037384 epoch=9 and step=10
+2026-02-14 14:33:35,872 - SplitNNServer - INFO - 17416 - phase=train acc=0.9955357142857143 loss=0.025085007771849632 epoch=9 and step=20
+2026-02-14 14:33:36,507 - SplitNNServer - INFO - 17416 - phase=train acc=0.9954637096774194 loss=0.019005898386240005 epoch=9 and step=30
+2026-02-14 14:33:37,218 - SplitNNServer - INFO - 17416 - phase=train acc=0.9961890243902439 loss=0.007669065147638321 epoch=9 and step=40
+2026-02-14 14:33:37,671 - SplitNNClient - INFO - 16208 - worker_num=1 epoch_send=1716443714 epoch_receive=678370018 total_send=1716443714 total_receive=678370018 send_by_category={'ACTS': 1716419792, 'MODEL': 19890, 'OTHER': 4032} recv_by_category={'GRADS': 678349120, 'OTHER': 1008, 'MODEL': 19890} send_by_type={2: 1716419792, 7: 19890, 3: 1008, 4: 1008, 6: 1008, 10: 1008} recv_by_type={1: 678349120, 6: 1008, 8: 19890}
+2026-02-14 14:33:39,165 - SplitNNServer - INFO - 17416 - phase=validation acc=0.9752 loss=0.0837204797724645 epoch=9 and step=79
+2026-02-14 14:33:42,253 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.004272627178579569 epoch=10 and step=0
+2026-02-14 14:33:43,057 - SplitNNServer - INFO - 17416 - phase=train acc=0.9985795454545454 loss=0.015046683140099049 epoch=10 and step=10
+2026-02-14 14:33:43,826 - SplitNNServer - INFO - 17416 - phase=train acc=0.9988839285714286 loss=0.014354508370161057 epoch=10 and step=20
+2026-02-14 14:33:44,475 - SplitNNServer - INFO - 17416 - phase=train acc=0.9984879032258065 loss=0.004079853184521198 epoch=10 and step=30
+2026-02-14 14:33:45,278 - SplitNNServer - INFO - 17416 - phase=train acc=0.9979039634146342 loss=0.004776609595865011 epoch=10 and step=40
+2026-02-14 14:33:45,677 - SplitNNClient - INFO - 16208 - worker_num=1 epoch_send=1899617236 epoch_receive=746207252 total_send=1899617236 total_receive=746207252 send_by_category={'ACTS': 1899590656, 'MODEL': 22100, 'OTHER': 4480} recv_by_category={'GRADS': 746184032, 'OTHER': 1120, 'MODEL': 22100} send_by_type={2: 1899590656, 7: 22100, 3: 1120, 4: 1120, 6: 1120, 10: 1120} recv_by_type={1: 746184032, 6: 1120, 8: 22100}
+2026-02-14 14:33:47,186 - SplitNNServer - INFO - 17416 - phase=validation acc=0.9753 loss=0.08337021196072057 epoch=10 and step=79
+2026-02-14 14:33:50,270 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.005309510510414839 epoch=11 and step=0
+2026-02-14 14:33:50,912 - SplitNNServer - INFO - 17416 - phase=train acc=0.9978693181818182 loss=0.008761638775467873 epoch=11 and step=10
+2026-02-14 14:33:51,546 - SplitNNServer - INFO - 17416 - phase=train acc=0.9988839285714286 loss=0.004291968885809183 epoch=11 and step=20
+2026-02-14 14:33:52,180 - SplitNNServer - INFO - 17416 - phase=train acc=0.9987399193548387 loss=0.005612840875983238 epoch=11 and step=30
+2026-02-14 14:33:52,910 - SplitNNServer - INFO - 17416 - phase=train acc=0.9988567073170732 loss=0.005191360600292683 epoch=11 and step=40
+2026-02-14 14:33:53,401 - SplitNNClient - INFO - 16208 - worker_num=1 epoch_send=2082790758 epoch_receive=814044486 total_send=2082790758 total_receive=814044486 send_by_category={'ACTS': 2082761520, 'MODEL': 24310, 'OTHER': 4928} recv_by_category={'GRADS': 814018944, 'OTHER': 1232, 'MODEL': 24310} send_by_type={2: 2082761520, 7: 24310, 3: 1232, 4: 1232, 6: 1232, 10: 1232} recv_by_type={1: 814018944, 6: 1232, 8: 24310}
+2026-02-14 14:33:54,913 - SplitNNServer - INFO - 17416 - phase=validation acc=0.9759 loss=0.08092650242132883 epoch=11 and step=79
+2026-02-14 14:33:58,030 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.006125019863247871 epoch=12 and step=0
+2026-02-14 14:33:58,743 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.002676275558769703 epoch=12 and step=10
+2026-02-14 14:33:59,421 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.005450780503451824 epoch=12 and step=20
+2026-02-14 14:34:00,056 - SplitNNServer - INFO - 17416 - phase=train acc=0.9997479838709677 loss=0.002200279152020812 epoch=12 and step=30
+2026-02-14 14:34:00,787 - SplitNNServer - INFO - 17416 - phase=train acc=0.9998094512195121 loss=0.004023735411465168 epoch=12 and step=40
+2026-02-14 14:34:01,243 - SplitNNClient - INFO - 16208 - worker_num=1 epoch_send=2265964280 epoch_receive=881881720 total_send=2265964280 total_receive=881881720 send_by_category={'ACTS': 2265932384, 'MODEL': 26520, 'OTHER': 5376} recv_by_category={'GRADS': 881853856, 'OTHER': 1344, 'MODEL': 26520} send_by_type={2: 2265932384, 7: 26520, 3: 1344, 4: 1344, 6: 1344, 10: 1344} recv_by_type={1: 881853856, 6: 1344, 8: 26520}
+2026-02-14 14:34:02,778 - SplitNNServer - INFO - 17416 - phase=validation acc=0.9763 loss=0.08347452081704168 epoch=12 and step=79
+2026-02-14 14:34:05,861 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.003207201138138771 epoch=13 and step=0
+2026-02-14 14:34:06,667 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.00839415192604065 epoch=13 and step=10
+2026-02-14 14:34:07,582 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.009297574870288372 epoch=13 and step=20
+2026-02-14 14:34:08,407 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.005836655385792255 epoch=13 and step=30
+2026-02-14 14:34:09,262 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.0020829341374337673 epoch=13 and step=40
+2026-02-14 14:34:09,696 - SplitNNClient - INFO - 16208 - worker_num=1 epoch_send=2449137802 epoch_receive=949718954 total_send=2449137802 total_receive=949718954 send_by_category={'ACTS': 2449103248, 'MODEL': 28730, 'OTHER': 5824} recv_by_category={'GRADS': 949688768, 'OTHER': 1456, 'MODEL': 28730} send_by_type={2: 2449103248, 7: 28730, 3: 1456, 4: 1456, 6: 1456, 10: 1456} recv_by_type={1: 949688768, 6: 1456, 8: 28730}
+2026-02-14 14:34:11,227 - SplitNNServer - INFO - 17416 - phase=validation acc=0.9764 loss=0.08174741291514703 epoch=13 and step=79
+2026-02-14 14:34:14,314 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.0028849118389189243 epoch=14 and step=0
+2026-02-14 14:34:14,982 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.003346448065713048 epoch=14 and step=10
+2026-02-14 14:34:15,846 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.0019765158649533987 epoch=14 and step=20
+2026-02-14 14:34:16,482 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.0024013682268559933 epoch=14 and step=30
+2026-02-14 14:34:17,224 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.0020580661948770285 epoch=14 and step=40
+2026-02-14 14:34:17,575 - SplitNNClient - INFO - 16208 - worker_num=1 epoch_send=2632311324 epoch_receive=1017556188 total_send=2632311324 total_receive=1017556188 send_by_category={'ACTS': 2632274112, 'MODEL': 30940, 'OTHER': 6272} recv_by_category={'GRADS': 1017523680, 'OTHER': 1568, 'MODEL': 30940} send_by_type={2: 2632274112, 7: 30940, 3: 1568, 4: 1568, 6: 1568, 10: 1568} recv_by_type={1: 1017523680, 6: 1568, 8: 30940}
+2026-02-14 14:34:19,103 - SplitNNServer - INFO - 17416 - phase=validation acc=0.9768 loss=0.08413802423575949 epoch=14 and step=79
+2026-02-14 14:34:22,223 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.0015622921055182815 epoch=15 and step=0
+2026-02-14 14:34:23,084 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.0037114499136805534 epoch=15 and step=10
+2026-02-14 14:34:23,825 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.0022863242775201797 epoch=15 and step=20
+2026-02-14 14:34:24,502 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.0020753515418618917 epoch=15 and step=30
+2026-02-14 14:34:25,295 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.0024437427055090666 epoch=15 and step=40
+2026-02-14 14:34:25,814 - SplitNNClient - INFO - 16208 - worker_num=1 epoch_send=2815484846 epoch_receive=1085393422 total_send=2815484846 total_receive=1085393422 send_by_category={'ACTS': 2815444976, 'MODEL': 33150, 'OTHER': 6720} recv_by_category={'GRADS': 1085358592, 'OTHER': 1680, 'MODEL': 33150} send_by_type={2: 2815444976, 7: 33150, 3: 1680, 4: 1680, 6: 1680, 10: 1680} recv_by_type={1: 1085358592, 6: 1680, 8: 33150}
+2026-02-14 14:34:27,303 - SplitNNServer - INFO - 17416 - phase=validation acc=0.9758 loss=0.0854649040125947 epoch=15 and step=79
+2026-02-14 14:34:30,427 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.0025336574763059616 epoch=16 and step=0
+2026-02-14 14:34:31,162 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.007601456250995398 epoch=16 and step=10
+2026-02-14 14:34:31,842 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.004334037657827139 epoch=16 and step=20
+2026-02-14 14:34:32,484 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.0017564158188179135 epoch=16 and step=30
+2026-02-14 14:34:33,121 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.0017763200448825955 epoch=16 and step=40
+2026-02-14 14:34:33,468 - SplitNNClient - INFO - 16208 - worker_num=1 epoch_send=2998658368 epoch_receive=1153230656 total_send=2998658368 total_receive=1153230656 send_by_category={'ACTS': 2998615840, 'MODEL': 35360, 'OTHER': 7168} recv_by_category={'GRADS': 1153193504, 'OTHER': 1792, 'MODEL': 35360} send_by_type={2: 2998615840, 7: 35360, 3: 1792, 4: 1792, 6: 1792, 10: 1792} recv_by_type={1: 1153193504, 6: 1792, 8: 35360}
+2026-02-14 14:34:34,971 - SplitNNServer - INFO - 17416 - phase=validation acc=0.9772 loss=0.08493924199828592 epoch=16 and step=79
+2026-02-14 14:34:38,054 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.0014343939255923033 epoch=17 and step=0
+2026-02-14 14:34:38,976 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.0012238670606166124 epoch=17 and step=10
+2026-02-14 14:34:39,826 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.0014843505341559649 epoch=17 and step=20
+2026-02-14 14:34:40,556 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.001876426162198186 epoch=17 and step=30
+2026-02-14 14:34:41,314 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.001770095550455153 epoch=17 and step=40
+2026-02-14 14:34:41,715 - SplitNNClient - INFO - 16208 - worker_num=1 epoch_send=3181831890 epoch_receive=1221067890 total_send=3181831890 total_receive=1221067890 send_by_category={'ACTS': 3181786704, 'MODEL': 37570, 'OTHER': 7616} recv_by_category={'GRADS': 1221028416, 'OTHER': 1904, 'MODEL': 37570} send_by_type={2: 3181786704, 7: 37570, 3: 1904, 4: 1904, 6: 1904, 10: 1904} recv_by_type={1: 1221028416, 6: 1904, 8: 37570}
+2026-02-14 14:34:43,228 - SplitNNServer - INFO - 17416 - phase=validation acc=0.9769 loss=0.0850283543590701 epoch=17 and step=79
+2026-02-14 14:34:46,273 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.0013826542999595404 epoch=18 and step=0
+2026-02-14 14:34:47,022 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.0015879875281825662 epoch=18 and step=10
+2026-02-14 14:34:47,845 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.001717354985885322 epoch=18 and step=20
+2026-02-14 14:34:48,642 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.0016827851068228483 epoch=18 and step=30
+2026-02-14 14:34:49,369 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.0020373642910271883 epoch=18 and step=40
+2026-02-14 14:34:49,713 - SplitNNClient - INFO - 16208 - worker_num=1 epoch_send=3365005412 epoch_receive=1288905124 total_send=3365005412 total_receive=1288905124 send_by_category={'ACTS': 3364957568, 'MODEL': 39780, 'OTHER': 8064} recv_by_category={'GRADS': 1288863328, 'OTHER': 2016, 'MODEL': 39780} send_by_type={2: 3364957568, 7: 39780, 3: 2016, 4: 2016, 6: 2016, 10: 2016} recv_by_type={1: 1288863328, 6: 2016, 8: 39780}
+2026-02-14 14:34:51,272 - SplitNNServer - INFO - 17416 - phase=validation acc=0.977 loss=0.08701278701443664 epoch=18 and step=79
+2026-02-14 14:34:54,348 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.00047730215010233223 epoch=19 and step=0
+2026-02-14 14:34:55,196 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.0009767564479261637 epoch=19 and step=10
+2026-02-14 14:34:56,033 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.0009448985219933093 epoch=19 and step=20
+2026-02-14 14:34:56,730 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.0007234704098664224 epoch=19 and step=30
+2026-02-14 14:34:57,534 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.002893581287935376 epoch=19 and step=40
+2026-02-14 14:34:57,990 - SplitNNClient - INFO - 16208 - worker_num=1 epoch_send=3548178934 epoch_receive=1356742358 total_send=3548178934 total_receive=1356742358 send_by_category={'ACTS': 3548128432, 'MODEL': 41990, 'OTHER': 8512} recv_by_category={'GRADS': 1356698240, 'OTHER': 2128, 'MODEL': 41990} send_by_type={2: 3548128432, 7: 41990, 3: 2128, 4: 2128, 6: 2128, 10: 2128} recv_by_type={1: 1356698240, 6: 2128, 8: 41990}
+2026-02-14 14:34:59,522 - SplitNNServer - INFO - 17416 - phase=validation acc=0.9772 loss=0.08722736298102374 epoch=19 and step=79
+2026-02-14 14:35:02,576 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.0024769490119069815 epoch=20 and step=0
+2026-02-14 14:35:03,432 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.0007068400736898184 epoch=20 and step=10
+2026-02-14 14:35:04,071 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.0002466944570187479 epoch=20 and step=20
+2026-02-14 14:35:04,810 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.0008281847694888711 epoch=20 and step=30
+2026-02-14 14:35:05,670 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.0017670339439064264 epoch=20 and step=40
+2026-02-14 14:35:06,129 - SplitNNClient - INFO - 16208 - worker_num=1 epoch_send=3731352456 epoch_receive=1424579592 total_send=3731352456 total_receive=1424579592 send_by_category={'ACTS': 3731299296, 'MODEL': 44200, 'OTHER': 8960} recv_by_category={'GRADS': 1424533152, 'OTHER': 2240, 'MODEL': 44200} send_by_type={2: 3731299296, 7: 44200, 3: 2240, 4: 2240, 6: 2240, 10: 2240} recv_by_type={1: 1424533152, 6: 2240, 8: 44200}
+2026-02-14 14:35:07,755 - SplitNNServer - INFO - 17416 - phase=validation acc=0.9768 loss=0.08811691531475764 epoch=20 and step=79
+2026-02-14 14:35:10,846 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.0012020383728668094 epoch=21 and step=0
+2026-02-14 14:35:11,736 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.0011256292928010225 epoch=21 and step=10
+2026-02-14 14:35:12,624 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.0011545500019565225 epoch=21 and step=20
+2026-02-14 14:35:13,361 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.0007982806419022381 epoch=21 and step=30
+2026-02-14 14:35:14,311 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.002000239910557866 epoch=21 and step=40
+2026-02-14 14:35:14,765 - SplitNNClient - INFO - 16208 - worker_num=1 epoch_send=3914525978 epoch_receive=1492416826 total_send=3914525978 total_receive=1492416826 send_by_category={'ACTS': 3914470160, 'MODEL': 46410, 'OTHER': 9408} recv_by_category={'GRADS': 1492368064, 'OTHER': 2352, 'MODEL': 46410} send_by_type={2: 3914470160, 7: 46410, 3: 2352, 4: 2352, 6: 2352, 10: 2352} recv_by_type={1: 1492368064, 6: 2352, 8: 46410}
+2026-02-14 14:35:16,297 - SplitNNServer - INFO - 17416 - phase=validation acc=0.9772 loss=0.08868587988397365 epoch=21 and step=79
+2026-02-14 14:35:19,408 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.001101190224289894 epoch=22 and step=0
+2026-02-14 14:35:20,278 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.0009447155171073973 epoch=22 and step=10
+2026-02-14 14:35:21,045 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.001561236334964633 epoch=22 and step=20
+2026-02-14 14:35:21,877 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.001085281022824347 epoch=22 and step=30
+2026-02-14 14:35:22,794 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.0007345445337705314 epoch=22 and step=40
+2026-02-14 14:35:23,310 - SplitNNClient - INFO - 16208 - worker_num=1 epoch_send=4097699500 epoch_receive=1560254060 total_send=4097699500 total_receive=1560254060 send_by_category={'ACTS': 4097641024, 'MODEL': 48620, 'OTHER': 9856} recv_by_category={'GRADS': 1560202976, 'OTHER': 2464, 'MODEL': 48620} send_by_type={2: 4097641024, 7: 48620, 3: 2464, 4: 2464, 6: 2464, 10: 2464} recv_by_type={1: 1560202976, 6: 2464, 8: 48620}
+2026-02-14 14:35:24,871 - SplitNNServer - INFO - 17416 - phase=validation acc=0.977 loss=0.08846356959150432 epoch=22 and step=79
+2026-02-14 14:35:27,967 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.0013865685323253274 epoch=23 and step=0
+2026-02-14 14:35:28,599 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.0017389844870194793 epoch=23 and step=10
+2026-02-14 14:35:29,235 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.0013896222226321697 epoch=23 and step=20
+2026-02-14 14:35:29,913 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.0007921389769762754 epoch=23 and step=30
+2026-02-14 14:35:30,647 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.00022906658705323935 epoch=23 and step=40
+2026-02-14 14:35:31,048 - SplitNNClient - INFO - 16208 - worker_num=1 epoch_send=4280873022 epoch_receive=1628091294 total_send=4280873022 total_receive=1628091294 send_by_category={'ACTS': 4280811888, 'MODEL': 50830, 'OTHER': 10304} recv_by_category={'GRADS': 1628037888, 'OTHER': 2576, 'MODEL': 50830} send_by_type={2: 4280811888, 7: 50830, 3: 2576, 4: 2576, 6: 2576, 10: 2576} recv_by_type={1: 1628037888, 6: 2576, 8: 50830}
+2026-02-14 14:35:32,576 - SplitNNServer - INFO - 17416 - phase=validation acc=0.9768 loss=0.08883665605827457 epoch=23 and step=79
+2026-02-14 14:35:35,639 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.0014603512827306986 epoch=24 and step=0
+2026-02-14 14:35:36,277 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.0016640707617625594 epoch=24 and step=10
+2026-02-14 14:35:36,910 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.0007102936506271362 epoch=24 and step=20
+2026-02-14 14:35:37,594 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.00044198284740559757 epoch=24 and step=30
+2026-02-14 14:35:38,450 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.0006136790616437793 epoch=24 and step=40
+2026-02-14 14:35:38,849 - SplitNNClient - INFO - 16208 - worker_num=1 epoch_send=4464046544 epoch_receive=1695928528 total_send=4464046544 total_receive=1695928528 send_by_category={'ACTS': 4463982752, 'MODEL': 53040, 'OTHER': 10752} recv_by_category={'GRADS': 1695872800, 'OTHER': 2688, 'MODEL': 53040} send_by_type={2: 4463982752, 7: 53040, 3: 2688, 4: 2688, 6: 2688, 10: 2688} recv_by_type={1: 1695872800, 6: 2688, 8: 53040}
+2026-02-14 14:35:40,345 - SplitNNServer - INFO - 17416 - phase=validation acc=0.9766 loss=0.08929337120505669 epoch=24 and step=79
+2026-02-14 14:35:43,460 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.0009148385724984109 epoch=25 and step=0
+2026-02-14 14:35:44,101 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.0005644931807182729 epoch=25 and step=10
+2026-02-14 14:35:44,813 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.0005697172600775957 epoch=25 and step=20
+2026-02-14 14:35:45,672 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.0011536225210875273 epoch=25 and step=30
+2026-02-14 14:35:46,602 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.0006910748779773712 epoch=25 and step=40
+2026-02-14 14:35:46,948 - SplitNNClient - INFO - 16208 - worker_num=1 epoch_send=4647220066 epoch_receive=1763765762 total_send=4647220066 total_receive=1763765762 send_by_category={'ACTS': 4647153616, 'MODEL': 55250, 'OTHER': 11200} recv_by_category={'GRADS': 1763707712, 'OTHER': 2800, 'MODEL': 55250} send_by_type={2: 4647153616, 7: 55250, 3: 2800, 4: 2800, 6: 2800, 10: 2800} recv_by_type={1: 1763707712, 6: 2800, 8: 55250}
+2026-02-14 14:35:48,509 - SplitNNServer - INFO - 17416 - phase=validation acc=0.9769 loss=0.09084844515732411 epoch=25 and step=79
+2026-02-14 14:35:51,595 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.0008231789106503129 epoch=26 and step=0
+2026-02-14 14:35:52,462 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.0006296513020060956 epoch=26 and step=10
+2026-02-14 14:35:53,223 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.0013585868291556835 epoch=26 and step=20
+2026-02-14 14:35:54,049 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.0007449542754329741 epoch=26 and step=30
+2026-02-14 14:35:54,780 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.0012514450354501605 epoch=26 and step=40
+2026-02-14 14:35:55,181 - SplitNNClient - INFO - 16208 - worker_num=1 epoch_send=4830393588 epoch_receive=1831602996 total_send=4830393588 total_receive=1831602996 send_by_category={'ACTS': 4830324480, 'MODEL': 57460, 'OTHER': 11648} recv_by_category={'GRADS': 1831542624, 'OTHER': 2912, 'MODEL': 57460} send_by_type={2: 4830324480, 7: 57460, 3: 2912, 4: 2912, 6: 2912, 10: 2912} recv_by_type={1: 1831542624, 6: 2912, 8: 57460}
+2026-02-14 14:35:56,787 - SplitNNServer - INFO - 17416 - phase=validation acc=0.9773 loss=0.09031942424159832 epoch=26 and step=79
+2026-02-14 14:35:59,899 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.0002740699565038085 epoch=27 and step=0
+2026-02-14 14:36:00,536 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.0005268715904094279 epoch=27 and step=10
+2026-02-14 14:36:01,348 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.0007360322633758187 epoch=27 and step=20
+2026-02-14 14:36:02,056 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.000740000163204968 epoch=27 and step=30
+2026-02-14 14:36:03,007 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.0010650005424395204 epoch=27 and step=40
+2026-02-14 14:36:03,528 - SplitNNClient - INFO - 16208 - worker_num=1 epoch_send=5013567110 epoch_receive=1899440230 total_send=5013567110 total_receive=1899440230 send_by_category={'ACTS': 5013495344, 'MODEL': 59670, 'OTHER': 12096} recv_by_category={'GRADS': 1899377536, 'OTHER': 3024, 'MODEL': 59670} send_by_type={2: 5013495344, 7: 59670, 3: 3024, 4: 3024, 6: 3024, 10: 3024} recv_by_type={1: 1899377536, 6: 3024, 8: 59670}
+2026-02-14 14:36:05,059 - SplitNNServer - INFO - 17416 - phase=validation acc=0.977 loss=0.09028014749672458 epoch=27 and step=79
+2026-02-14 14:36:08,113 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.0007819552556611598 epoch=28 and step=0
+2026-02-14 14:36:08,854 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.0003939308226108551 epoch=28 and step=10
+2026-02-14 14:36:09,505 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.0008856673375703394 epoch=28 and step=20
+2026-02-14 14:36:10,363 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.0009684262331575155 epoch=28 and step=30
+2026-02-14 14:36:11,140 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.0007912447326816618 epoch=28 and step=40
+2026-02-14 14:36:11,626 - SplitNNClient - INFO - 16208 - worker_num=1 epoch_send=5196740632 epoch_receive=1967277464 total_send=5196740632 total_receive=1967277464 send_by_category={'ACTS': 5196666208, 'MODEL': 61880, 'OTHER': 12544} recv_by_category={'GRADS': 1967212448, 'OTHER': 3136, 'MODEL': 61880} send_by_type={2: 5196666208, 7: 61880, 3: 3136, 4: 3136, 6: 3136, 10: 3136} recv_by_type={1: 1967212448, 6: 3136, 8: 61880}
+2026-02-14 14:36:13,194 - SplitNNServer - INFO - 17416 - phase=validation acc=0.9773 loss=0.0910333467107746 epoch=28 and step=79
+2026-02-14 14:36:16,287 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.0006673263851553202 epoch=29 and step=0
+2026-02-14 14:36:17,093 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.0005112935323268175 epoch=29 and step=10
+2026-02-14 14:36:17,856 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.0008069965988397598 epoch=29 and step=20
+2026-02-14 14:36:18,712 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.0007785416673868895 epoch=29 and step=30
+2026-02-14 14:36:19,514 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.0004943107487633824 epoch=29 and step=40
+2026-02-14 14:36:19,864 - SplitNNClient - INFO - 16208 - worker_num=1 epoch_send=5379914154 epoch_receive=2035114698 total_send=5379914154 total_receive=2035114698 send_by_category={'ACTS': 5379837072, 'MODEL': 64090, 'OTHER': 12992} recv_by_category={'GRADS': 2035047360, 'OTHER': 3248, 'MODEL': 64090} send_by_type={2: 5379837072, 7: 64090, 3: 3248, 4: 3248, 6: 3248, 10: 3248} recv_by_type={1: 2035047360, 6: 3248, 8: 64090}
+2026-02-14 14:36:21,574 - SplitNNServer - INFO - 17416 - phase=validation acc=0.977 loss=0.0915553539344164 epoch=29 and step=79
+2026-02-14 14:36:24,655 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.0003037763817701489 epoch=30 and step=0
+2026-02-14 14:36:25,545 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.0006166899111121893 epoch=30 and step=10
+2026-02-14 14:36:26,431 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.0007189899333752692 epoch=30 and step=20
+2026-02-14 14:36:27,098 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.000699326628819108 epoch=30 and step=30
+2026-02-14 14:36:27,823 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.0007578306831419468 epoch=30 and step=40
+2026-02-14 14:36:28,244 - SplitNNClient - INFO - 16208 - worker_num=1 epoch_send=5563087676 epoch_receive=2102951932 total_send=5563087676 total_receive=2102951932 send_by_category={'ACTS': 5563007936, 'MODEL': 66300, 'OTHER': 13440} recv_by_category={'GRADS': 2102882272, 'OTHER': 3360, 'MODEL': 66300} send_by_type={2: 5563007936, 7: 66300, 3: 3360, 4: 3360, 6: 3360, 10: 3360} recv_by_type={1: 2102882272, 6: 3360, 8: 66300}
+2026-02-14 14:36:29,792 - SplitNNServer - INFO - 17416 - phase=validation acc=0.9771 loss=0.09166456641525103 epoch=30 and step=79
+2026-02-14 14:36:32,908 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.0010176417417824268 epoch=31 and step=0
+2026-02-14 14:36:33,688 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.001595532288774848 epoch=31 and step=10
+2026-02-14 14:36:34,429 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.0003556650481186807 epoch=31 and step=20
+2026-02-14 14:36:35,163 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.0011798624182119966 epoch=31 and step=30
+2026-02-14 14:36:35,802 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.0006145871011540294 epoch=31 and step=40
+2026-02-14 14:36:36,267 - SplitNNClient - INFO - 16208 - worker_num=1 epoch_send=5746261198 epoch_receive=2170789166 total_send=5746261198 total_receive=2170789166 send_by_category={'ACTS': 5746178800, 'MODEL': 68510, 'OTHER': 13888} recv_by_category={'GRADS': 2170717184, 'OTHER': 3472, 'MODEL': 68510} send_by_type={2: 5746178800, 7: 68510, 3: 3472, 4: 3472, 6: 3472, 10: 3472} recv_by_type={1: 2170717184, 6: 3472, 8: 68510}
+2026-02-14 14:36:37,844 - SplitNNServer - INFO - 17416 - phase=validation acc=0.977 loss=0.09244686955091448 epoch=31 and step=79
+2026-02-14 14:36:40,957 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.00036952635855413973 epoch=32 and step=0
+2026-02-14 14:36:41,708 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.0006674326141364872 epoch=32 and step=10
+2026-02-14 14:36:42,657 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.0004937282064929605 epoch=32 and step=20
+2026-02-14 14:36:43,469 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.00035053264582529664 epoch=32 and step=30
+2026-02-14 14:36:44,170 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.0005315121379680932 epoch=32 and step=40
+2026-02-14 14:36:44,601 - SplitNNClient - INFO - 16208 - worker_num=1 epoch_send=5929434720 epoch_receive=2238626400 total_send=5929434720 total_receive=2238626400 send_by_category={'ACTS': 5929349664, 'MODEL': 70720, 'OTHER': 14336} recv_by_category={'GRADS': 2238552096, 'OTHER': 3584, 'MODEL': 70720} send_by_type={2: 5929349664, 7: 70720, 3: 3584, 4: 3584, 6: 3584, 10: 3584} recv_by_type={1: 2238552096, 6: 3584, 8: 70720}
+2026-02-14 14:36:46,165 - SplitNNServer - INFO - 17416 - phase=validation acc=0.9772 loss=0.09317713338534787 epoch=32 and step=79
+2026-02-14 14:36:49,262 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.0007216898957267404 epoch=33 and step=0
+2026-02-14 14:36:49,963 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.000675421382766217 epoch=33 and step=10
+2026-02-14 14:36:50,733 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.0008916672668419778 epoch=33 and step=20
+2026-02-14 14:36:51,379 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.0006617744220420718 epoch=33 and step=30
+2026-02-14 14:36:52,019 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.00045093579683452845 epoch=33 and step=40
+2026-02-14 14:36:52,391 - SplitNNClient - INFO - 16208 - worker_num=1 epoch_send=6112608242 epoch_receive=2306463634 total_send=6112608242 total_receive=2306463634 send_by_category={'ACTS': 6112520528, 'MODEL': 72930, 'OTHER': 14784} recv_by_category={'GRADS': 2306387008, 'OTHER': 3696, 'MODEL': 72930} send_by_type={2: 6112520528, 7: 72930, 3: 3696, 4: 3696, 6: 3696, 10: 3696} recv_by_type={1: 2306387008, 6: 3696, 8: 72930}
+2026-02-14 14:36:53,921 - SplitNNServer - INFO - 17416 - phase=validation acc=0.9772 loss=0.09302001343101875 epoch=33 and step=79
+2026-02-14 14:36:57,001 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.0006155342562124133 epoch=34 and step=0
+2026-02-14 14:36:57,732 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.00032406291575171053 epoch=34 and step=10
+2026-02-14 14:36:58,521 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.00041194731602445245 epoch=34 and step=20
+2026-02-14 14:36:59,311 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.0006589139229618013 epoch=34 and step=30
+2026-02-14 14:36:59,982 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.0015835355734452605 epoch=34 and step=40
+2026-02-14 14:37:00,318 - SplitNNClient - INFO - 16208 - worker_num=1 epoch_send=6295781764 epoch_receive=2374300868 total_send=6295781764 total_receive=2374300868 send_by_category={'ACTS': 6295691392, 'MODEL': 75140, 'OTHER': 15232} recv_by_category={'GRADS': 2374221920, 'OTHER': 3808, 'MODEL': 75140} send_by_type={2: 6295691392, 7: 75140, 3: 3808, 4: 3808, 6: 3808, 10: 3808} recv_by_type={1: 2374221920, 6: 3808, 8: 75140}
+2026-02-14 14:37:01,875 - SplitNNServer - INFO - 17416 - phase=validation acc=0.9767 loss=0.09289757116641939 epoch=34 and step=79
+2026-02-14 14:37:04,954 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.0003183202934451401 epoch=35 and step=0
+2026-02-14 14:37:05,624 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.0006748748710379004 epoch=35 and step=10
+2026-02-14 14:37:06,260 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.0005889125750400126 epoch=35 and step=20
+2026-02-14 14:37:06,937 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.0009337392402812839 epoch=35 and step=30
+2026-02-14 14:37:07,764 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.0003644588286988437 epoch=35 and step=40
+2026-02-14 14:37:08,218 - SplitNNClient - INFO - 16208 - worker_num=1 epoch_send=6478955286 epoch_receive=2442138102 total_send=6478955286 total_receive=2442138102 send_by_category={'ACTS': 6478862256, 'MODEL': 77350, 'OTHER': 15680} recv_by_category={'GRADS': 2442056832, 'OTHER': 3920, 'MODEL': 77350} send_by_type={2: 6478862256, 7: 77350, 3: 3920, 4: 3920, 6: 3920, 10: 3920} recv_by_type={1: 2442056832, 6: 3920, 8: 77350}
+2026-02-14 14:37:09,726 - SplitNNServer - INFO - 17416 - phase=validation acc=0.9768 loss=0.09422101448452147 epoch=35 and step=79
+2026-02-14 14:37:12,772 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.0005629269289784133 epoch=36 and step=0
+2026-02-14 14:37:13,598 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.0006718754884786904 epoch=36 and step=10
+2026-02-14 14:37:14,455 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.0005369180580601096 epoch=36 and step=20
+2026-02-14 14:37:15,344 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.0003862234589178115 epoch=36 and step=30
+2026-02-14 14:37:16,071 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.000276145467069 epoch=36 and step=40
+2026-02-14 14:37:16,472 - SplitNNClient - INFO - 16208 - worker_num=1 epoch_send=6662128808 epoch_receive=2509975336 total_send=6662128808 total_receive=2509975336 send_by_category={'ACTS': 6662033120, 'MODEL': 79560, 'OTHER': 16128} recv_by_category={'GRADS': 2509891744, 'OTHER': 4032, 'MODEL': 79560} send_by_type={2: 6662033120, 7: 79560, 3: 4032, 4: 4032, 6: 4032, 10: 4032} recv_by_type={1: 2509891744, 6: 4032, 8: 79560}
+2026-02-14 14:37:17,952 - SplitNNServer - INFO - 17416 - phase=validation acc=0.9774 loss=0.09386416911397473 epoch=36 and step=79
+2026-02-14 14:37:21,050 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.0005304230726324022 epoch=37 and step=0
+2026-02-14 14:37:21,722 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.0003319403331261128 epoch=37 and step=10
+2026-02-14 14:37:22,493 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.0006079601589590311 epoch=37 and step=20
+2026-02-14 14:37:23,227 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.00021035727695561945 epoch=37 and step=30
+2026-02-14 14:37:23,971 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.00016645921277813613 epoch=37 and step=40
+2026-02-14 14:37:24,425 - SplitNNClient - INFO - 16208 - worker_num=1 epoch_send=6845302330 epoch_receive=2577812570 total_send=6845302330 total_receive=2577812570 send_by_category={'ACTS': 6845203984, 'MODEL': 81770, 'OTHER': 16576} recv_by_category={'GRADS': 2577726656, 'OTHER': 4144, 'MODEL': 81770} send_by_type={2: 6845203984, 7: 81770, 3: 4144, 4: 4144, 6: 4144, 10: 4144} recv_by_type={1: 2577726656, 6: 4144, 8: 81770}
+2026-02-14 14:37:25,941 - SplitNNServer - INFO - 17416 - phase=validation acc=0.977 loss=0.09428123537573131 epoch=37 and step=79
+2026-02-14 14:37:29,028 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.0006013702368363738 epoch=38 and step=0
+2026-02-14 14:37:29,708 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.0002490019833203405 epoch=38 and step=10
+2026-02-14 14:37:30,377 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.0009086300851777196 epoch=38 and step=20
+2026-02-14 14:37:31,214 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.0002509358455426991 epoch=38 and step=30
+2026-02-14 14:37:32,066 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.0004026324604637921 epoch=38 and step=40
+2026-02-14 14:37:32,486 - SplitNNClient - INFO - 16208 - worker_num=1 epoch_send=7028475852 epoch_receive=2645649804 total_send=7028475852 total_receive=2645649804 send_by_category={'ACTS': 7028374848, 'MODEL': 83980, 'OTHER': 17024} recv_by_category={'GRADS': 2645561568, 'OTHER': 4256, 'MODEL': 83980} send_by_type={2: 7028374848, 7: 83980, 3: 4256, 4: 4256, 6: 4256, 10: 4256} recv_by_type={1: 2645561568, 6: 4256, 8: 83980}
+2026-02-14 14:37:33,949 - SplitNNServer - INFO - 17416 - phase=validation acc=0.9772 loss=0.09450471332072856 epoch=38 and step=79
+2026-02-14 14:37:37,068 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.00042421655962243676 epoch=39 and step=0
+2026-02-14 14:37:37,895 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.000568416784517467 epoch=39 and step=10
+2026-02-14 14:37:38,716 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.00036083508166484535 epoch=39 and step=20
+2026-02-14 14:37:39,479 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.0007224261062219739 epoch=39 and step=30
+2026-02-14 14:37:40,332 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.00025732084759511054 epoch=39 and step=40
+2026-02-14 14:37:40,846 - SplitNNClient - INFO - 16208 - worker_num=1 epoch_send=7211649374 epoch_receive=2713487038 total_send=7211649374 total_receive=2713487038 send_by_category={'ACTS': 7211545712, 'MODEL': 86190, 'OTHER': 17472} recv_by_category={'GRADS': 2713396480, 'OTHER': 4368, 'MODEL': 86190} send_by_type={2: 7211545712, 7: 86190, 3: 4368, 4: 4368, 6: 4368, 10: 4368} recv_by_type={1: 2713396480, 6: 4368, 8: 86190}
+2026-02-14 14:37:42,378 - SplitNNServer - INFO - 17416 - phase=validation acc=0.9772 loss=0.09474235121623552 epoch=39 and step=79
+2026-02-14 14:37:45,454 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.00043306054431013763 epoch=40 and step=0
+2026-02-14 14:37:46,227 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.0003134769794996828 epoch=40 and step=10
+2026-02-14 14:37:46,938 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.000385645980713889 epoch=40 and step=20
+2026-02-14 14:37:47,625 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.0008331586723215878 epoch=40 and step=30
+2026-02-14 14:37:48,263 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.00041737084393389523 epoch=40 and step=40
+2026-02-14 14:37:48,632 - SplitNNClient - INFO - 16208 - worker_num=1 epoch_send=7394822896 epoch_receive=2781324272 total_send=7394822896 total_receive=2781324272 send_by_category={'ACTS': 7394716576, 'MODEL': 88400, 'OTHER': 17920} recv_by_category={'GRADS': 2781231392, 'OTHER': 4480, 'MODEL': 88400} send_by_type={2: 7394716576, 7: 88400, 3: 4480, 4: 4480, 6: 4480, 10: 4480} recv_by_type={1: 2781231392, 6: 4480, 8: 88400}
+2026-02-14 14:37:50,175 - SplitNNServer - INFO - 17416 - phase=validation acc=0.9772 loss=0.09532297158247724 epoch=40 and step=79
+2026-02-14 14:37:53,266 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.0003054708067793399 epoch=41 and step=0
+2026-02-14 14:37:53,912 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.0004805391072295606 epoch=41 and step=10
+2026-02-14 14:37:54,548 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.0004954588948749006 epoch=41 and step=20
+2026-02-14 14:37:55,220 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.0003783306747209281 epoch=41 and step=30
+2026-02-14 14:37:56,178 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.0005793190211988986 epoch=41 and step=40
+2026-02-14 14:37:56,703 - SplitNNClient - INFO - 16208 - worker_num=1 epoch_send=7577996418 epoch_receive=2849161506 total_send=7577996418 total_receive=2849161506 send_by_category={'ACTS': 7577887440, 'MODEL': 90610, 'OTHER': 18368} recv_by_category={'GRADS': 2849066304, 'OTHER': 4592, 'MODEL': 90610} send_by_type={2: 7577887440, 7: 90610, 3: 4592, 4: 4592, 6: 4592, 10: 4592} recv_by_type={1: 2849066304, 6: 4592, 8: 90610}
+2026-02-14 14:37:59,274 - SplitNNServer - INFO - 17416 - phase=validation acc=0.9771 loss=0.09524026782691744 epoch=41 and step=79
+2026-02-14 14:38:02,394 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.00022813226678408682 epoch=42 and step=0
+2026-02-14 14:38:03,028 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.0005191699019633234 epoch=42 and step=10
+2026-02-14 14:38:03,749 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.0005776447360403836 epoch=42 and step=20
+2026-02-14 14:38:04,550 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.0006060017622075975 epoch=42 and step=30
+2026-02-14 14:38:05,377 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.0004341154999565333 epoch=42 and step=40
+2026-02-14 14:38:05,829 - SplitNNClient - INFO - 16208 - worker_num=1 epoch_send=7761169940 epoch_receive=2916998740 total_send=7761169940 total_receive=2916998740 send_by_category={'ACTS': 7761058304, 'MODEL': 92820, 'OTHER': 18816} recv_by_category={'GRADS': 2916901216, 'OTHER': 4704, 'MODEL': 92820} send_by_type={2: 7761058304, 7: 92820, 3: 4704, 4: 4704, 6: 4704, 10: 4704} recv_by_type={1: 2916901216, 6: 4704, 8: 92820}
+2026-02-14 14:38:07,348 - SplitNNServer - INFO - 17416 - phase=validation acc=0.9769 loss=0.09568415572445552 epoch=42 and step=79
+2026-02-14 14:38:10,461 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.0005338531918823719 epoch=43 and step=0
+2026-02-14 14:38:11,201 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.00040045814239419997 epoch=43 and step=10
+2026-02-14 14:38:11,847 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.00028352413210086524 epoch=43 and step=20
+2026-02-14 14:38:12,481 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.0004655995580833405 epoch=43 and step=30
+2026-02-14 14:38:13,366 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.00034491514088585973 epoch=43 and step=40
+2026-02-14 14:38:13,853 - SplitNNClient - INFO - 16208 - worker_num=1 epoch_send=7944343462 epoch_receive=2984835974 total_send=7944343462 total_receive=2984835974 send_by_category={'ACTS': 7944229168, 'MODEL': 95030, 'OTHER': 19264} recv_by_category={'GRADS': 2984736128, 'OTHER': 4816, 'MODEL': 95030} send_by_type={2: 7944229168, 7: 95030, 3: 4816, 4: 4816, 6: 4816, 10: 4816} recv_by_type={1: 2984736128, 6: 4816, 8: 95030}
+2026-02-14 14:38:15,367 - SplitNNServer - INFO - 17416 - phase=validation acc=0.9771 loss=0.09612929242618946 epoch=43 and step=79
+2026-02-14 14:38:18,480 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.0004337808059062809 epoch=44 and step=0
+2026-02-14 14:38:19,146 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.000590102921705693 epoch=44 and step=10
+2026-02-14 14:38:19,942 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.0006348916213028133 epoch=44 and step=20
+2026-02-14 14:38:20,712 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.0007729273638688028 epoch=44 and step=30
+2026-02-14 14:38:21,633 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.000421426841057837 epoch=44 and step=40
+2026-02-14 14:38:22,116 - SplitNNClient - INFO - 16208 - worker_num=1 epoch_send=8127516984 epoch_receive=3052673208 total_send=8127516984 total_receive=3052673208 send_by_category={'ACTS': 8127400032, 'MODEL': 97240, 'OTHER': 19712} recv_by_category={'GRADS': 3052571040, 'OTHER': 4928, 'MODEL': 97240} send_by_type={2: 8127400032, 7: 97240, 3: 4928, 4: 4928, 6: 4928, 10: 4928} recv_by_type={1: 3052571040, 6: 4928, 8: 97240}
+2026-02-14 14:38:23,591 - SplitNNServer - INFO - 17416 - phase=validation acc=0.9771 loss=0.09568913143117024 epoch=44 and step=79
+2026-02-14 14:38:26,703 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.0003736259532161057 epoch=45 and step=0
+2026-02-14 14:38:27,341 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.00032404906232841313 epoch=45 and step=10
+2026-02-14 14:38:27,977 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.00041626617894507945 epoch=45 and step=20
+2026-02-14 14:38:28,659 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.00023448736465070397 epoch=45 and step=30
+2026-02-14 14:38:29,416 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.0007532704621553421 epoch=45 and step=40
+2026-02-14 14:38:29,757 - SplitNNClient - INFO - 16208 - worker_num=1 epoch_send=8310690506 epoch_receive=3120510442 total_send=8310690506 total_receive=3120510442 send_by_category={'ACTS': 8310570896, 'MODEL': 99450, 'OTHER': 20160} recv_by_category={'GRADS': 3120405952, 'OTHER': 5040, 'MODEL': 99450} send_by_type={2: 8310570896, 7: 99450, 3: 5040, 4: 5040, 6: 5040, 10: 5040} recv_by_type={1: 3120405952, 6: 5040, 8: 99450}
+2026-02-14 14:38:31,320 - SplitNNServer - INFO - 17416 - phase=validation acc=0.9769 loss=0.09663420144656638 epoch=45 and step=79
+2026-02-14 14:38:34,434 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.000321132130920887 epoch=46 and step=0
+2026-02-14 14:38:35,354 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.00027590992976911366 epoch=46 and step=10
+2026-02-14 14:38:36,114 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.00026335951406508684 epoch=46 and step=20
+2026-02-14 14:38:36,967 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.00019631884060800076 epoch=46 and step=30
+2026-02-14 14:38:37,919 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.00028384506003931165 epoch=46 and step=40
+2026-02-14 14:38:38,439 - SplitNNClient - INFO - 16208 - worker_num=1 epoch_send=8493864028 epoch_receive=3188347676 total_send=8493864028 total_receive=3188347676 send_by_category={'ACTS': 8493741760, 'MODEL': 101660, 'OTHER': 20608} recv_by_category={'GRADS': 3188240864, 'OTHER': 5152, 'MODEL': 101660} send_by_type={2: 8493741760, 7: 101660, 3: 5152, 4: 5152, 6: 5152, 10: 5152} recv_by_type={1: 3188240864, 6: 5152, 8: 101660}
+2026-02-14 14:38:39,946 - SplitNNServer - INFO - 17416 - phase=validation acc=0.9773 loss=0.09629509267065432 epoch=46 and step=79
+2026-02-14 14:38:43,032 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.00018858224211726338 epoch=47 and step=0
+2026-02-14 14:38:43,950 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.0003108379023615271 epoch=47 and step=10
+2026-02-14 14:38:44,740 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.00024692542501725256 epoch=47 and step=20
+2026-02-14 14:38:45,532 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.00029337764135561883 epoch=47 and step=30
+2026-02-14 14:38:46,383 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.0001605337456567213 epoch=47 and step=40
+2026-02-14 14:38:46,842 - SplitNNClient - INFO - 16208 - worker_num=1 epoch_send=8677037550 epoch_receive=3256184910 total_send=8677037550 total_receive=3256184910 send_by_category={'ACTS': 8676912624, 'MODEL': 103870, 'OTHER': 21056} recv_by_category={'GRADS': 3256075776, 'OTHER': 5264, 'MODEL': 103870} send_by_type={2: 8676912624, 7: 103870, 3: 5264, 4: 5264, 6: 5264, 10: 5264} recv_by_type={1: 3256075776, 6: 5264, 8: 103870}
+2026-02-14 14:38:48,381 - SplitNNServer - INFO - 17416 - phase=validation acc=0.9774 loss=0.09705391175207642 epoch=47 and step=79
+2026-02-14 14:38:51,457 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.00047086295671761036 epoch=48 and step=0
+2026-02-14 14:38:52,095 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.0005750356940552592 epoch=48 and step=10
+2026-02-14 14:38:52,728 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.0007146992138586938 epoch=48 and step=20
+2026-02-14 14:38:53,558 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.00017447368009015918 epoch=48 and step=30
+2026-02-14 14:38:54,195 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.00023338936443906277 epoch=48 and step=40
+2026-02-14 14:38:54,542 - SplitNNClient - INFO - 16208 - worker_num=1 epoch_send=8860211072 epoch_receive=3324022144 total_send=8860211072 total_receive=3324022144 send_by_category={'ACTS': 8860083488, 'MODEL': 106080, 'OTHER': 21504} recv_by_category={'GRADS': 3323910688, 'OTHER': 5376, 'MODEL': 106080} send_by_type={2: 8860083488, 7: 106080, 3: 5376, 4: 5376, 6: 5376, 10: 5376} recv_by_type={1: 3323910688, 6: 5376, 8: 106080}
+2026-02-14 14:38:56,100 - SplitNNServer - INFO - 17416 - phase=validation acc=0.977 loss=0.09689216241583347 epoch=48 and step=79
+2026-02-14 14:38:59,181 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.00013598808436654508 epoch=49 and step=0
+2026-02-14 14:38:59,830 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.0006296138744801283 epoch=49 and step=10
+2026-02-14 14:39:00,508 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.00047500451910309494 epoch=49 and step=20
+2026-02-14 14:39:01,236 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.0004492541484069079 epoch=49 and step=30
+2026-02-14 14:39:02,156 - SplitNNServer - INFO - 17416 - phase=train acc=1.0 loss=0.00019867326773237437 epoch=49 and step=40
+2026-02-14 14:39:02,641 - SplitNNClient - INFO - 16208 - worker_num=1 epoch_send=9043384594 epoch_receive=3391859378 total_send=9043384594 total_receive=3391859378 send_by_category={'ACTS': 9043254352, 'MODEL': 108290, 'OTHER': 21952} recv_by_category={'GRADS': 3391745600, 'OTHER': 5488, 'MODEL': 108290} send_by_type={2: 9043254352, 7: 108290, 3: 5488, 4: 5488, 6: 5488, 10: 5488} recv_by_type={1: 3391745600, 6: 5488, 8: 108290}
+2026-02-14 14:39:04,151 - CommBreakdown - INFO - 16208 - rank=1 node_type=client total_send=9158675988 total_receive=3391859378 send_by_category={'ACTS': 9158543200, 'MODEL': 110500, 'OTHER': 22288} recv_by_category={'GRADS': 3391745600, 'MODEL': 108290, 'OTHER': 5488} send_by_type={2: 9158543200, 7: 110500, 3: 5600, 4: 5600, 10: 5488, 6: 5488, 5: 112} recv_by_type={1: 3391745600, 8: 108290, 6: 5488} mm_send_by_type={2: 9158368200, 7: 109100, 3: 4200, 4: 4200, 10: 4116, 6: 4116, 5: 84} mm_recv_by_type={1: 3391745600, 8: 108290, 6: 5488}
+2026-02-14 14:39:04,153 - SplitNNServer - INFO - 17416 - phase=validation acc=0.9769 loss=0.09756687788377591 epoch=49 and step=79
+2026-02-14 14:39:04,163 - CommBreakdown - INFO - 17416 - rank=0 node_type=server total_send=3391854002 total_receive=9158670500 send_by_category={'GRADS': 3391745600, 'MODEL': 108290, 'OTHER': 112} recv_by_category={'ACTS': 9158543200, 'MODEL': 110500, 'OTHER': 16800} send_by_type={1: 3391745600, 8: 108290, 5: 112} recv_by_type={2: 9158543200, 7: 110500, 3: 5600, 4: 5600, 10: 5488, 5: 112} mm_send_by_type={1: 3391681200, 8: 106918, 5: 84} mm_recv_by_type={2: 9158543200, 7: 110500, 3: 5600, 4: 5600, 10: 5488}
+2026-02-14 14:39:04,189 - init_server - INFO - 17416 - Server run end
