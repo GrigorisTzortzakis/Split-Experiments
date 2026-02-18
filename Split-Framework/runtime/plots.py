@@ -1056,10 +1056,8 @@ def main(argv: Optional[List[str]] = None) -> int:
                 by_scenario.setdefault(_scenario_key_from_stem(r.log_path.stem), []).append(r)
 
             for scenario, subruns in sorted(by_scenario.items()):
-                # Only meaningful if scenario has >=2 client-counts.
-                uniq_sub = sorted(set(int(r.n_clients) for r in subruns if r.n_clients is not None))
-                if len(uniq_sub) <= 1:
-                    continue
+                # Write overlays even if there's only one run/client-count in the scenario.
+                # This ensures scenarios like alpha0 still get their mixed_clients plots.
                 out_dir = plots_root / group / "mixed_clients" / scenario
                 written = plot_mixed_clients_overlays(
                     runs=subruns,

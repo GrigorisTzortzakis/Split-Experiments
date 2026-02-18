@@ -1,10 +1,5 @@
-# Generated experiment artifacts (paths relative to this folder)
-results/logs/
-results/plots/
-
-# Common outputs under results
-results/**/*.png
-results/**/*.log
+# NOTE: results/ is intentionally NOT ignored so experiment outputs
+# (logs/plots/etc) can be committed when desired.
 
 # Python
 __pycache__/
