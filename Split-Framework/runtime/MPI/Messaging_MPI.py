@@ -26,6 +26,83 @@ from mpi4py import MPI
 from collections import defaultdict
 
 
+def _get_bool_arg(args, key: str, default: bool) -> bool:
+    try:
+        if isinstance(args, dict):
+            return bool(args.get(key, default))
+    except Exception:
+        pass
+    # Many parts of this framework pass a dict-like Config object that supports
+    # `args["key"]` for both declared fields and extra YAML keys.
+    try:
+        if hasattr(args, "__getitem__"):
+            v = args[key]
+            if v is not None:
+                return bool(v)
+    except Exception:
+        pass
+    try:
+        return bool(getattr(args, key, default))
+    except Exception:
+        return bool(default)
+
+
+def _get_float_arg(args, key: str, default):
+    """Best-effort float arg reader.
+
+    Supports dict-like Config objects and plain objects.
+    If `default` is None, returns None when the key is missing/unparseable.
+    """
+
+    def _to_float(v):
+        if v is None:
+            return None
+        try:
+            return float(v)
+        except Exception:
+            return None
+
+    try:
+        if isinstance(args, dict) and key in args:
+            out = _to_float(args.get(key))
+            return out if out is not None else default
+    except Exception:
+        pass
+
+    try:
+        if hasattr(args, "__getitem__"):
+            out = _to_float(args[key])
+            return out if out is not None else default
+    except Exception:
+        pass
+
+    try:
+        out = _to_float(getattr(args, key, default))
+        return out if out is not None else default
+    except Exception:
+        return default
+
+
+def _get_str_arg(args, key: str, default: str) -> str:
+    try:
+        if isinstance(args, dict) and key in args:
+            v = args[key]
+            return default if v is None else str(v)
+    except Exception:
+        pass
+    try:
+        if hasattr(args, "__getitem__"):
+            v = args[key]
+            return default if v is None else str(v)
+    except Exception:
+        pass
+    try:
+        v = getattr(args, key, default)
+        return default if v is None else str(v)
+    except Exception:
+        return str(default)
+
+
 class Message(object):
     MSG_ARG_KEY_OPERATION = "operation"
     MSG_ARG_KEY_TYPE = "msg_type"
@@ -491,8 +568,196 @@ class MessageManager(Observer):
         self.bytes_sent_by_type = defaultdict(int)
         self.bytes_received_by_type = defaultdict(int)
 
+        # --- Communication compression hooks (forward/backward quantization) ---
+        # Backward-compat: `quantize_activations` previously controlled forward-only.
+        quantize_acts_legacy = _get_bool_arg(args, "quantize_activations", True)
+
+        # New switches:
+        # - quantize_forward: quantize messages carrying "activations"
+        # - quantize_backward: quantize messages carrying "activation_grads"
+        self._quantize_forward = _get_bool_arg(args, "quantize_forward", quantize_acts_legacy)
+        self._quantize_backward = _get_bool_arg(args, "quantize_backward", False)
+
+        # Future controller: select codec independently for forward/backward.
+        # Supported right now:
+        # - "dynamic_symmetric_int8" (default)
+        # - "fixed_scale_int8" (uses <prefix>_truncation_scale or truncation_scale)
+        # - "fp8_e4m3" (FP8 E4M3 software codec)
+        # - "none" (disable for that direction)
+        self._forward_quantization = _get_str_arg(args, "forward_quantization", "dynamic_symmetric_int8").strip().lower()
+        self._backward_quantization = _get_str_arg(args, "backward_quantization", "dynamic_symmetric_int8").strip().lower()
+
+        self._fwd_codec = None
+        self._bwd_codec = None
+
+        def _build_codec(kind: str, *, scale_key_prefix: str):
+            if kind in ("none", "off", "false", "0"):
+                return None
+            # Keep imports local so MPI can still run if compression module is absent.
+            from compression.quantization.Truncation import TruncationFloat8Codec, TruncationInt8Codec
+
+            if kind in ("dynamic_symmetric_int8", "dynamic_int8", "int8"):
+                return TruncationInt8Codec()
+            if kind in ("fixed_scale_int8", "fixed_int8"):
+                # Prefer per-direction override key, fall back to shared truncation_scale.
+                trunc_scale = _get_float_arg(args, f"{scale_key_prefix}_truncation_scale", None)
+                if trunc_scale is None:
+                    trunc_scale = _get_float_arg(args, "truncation_scale", 10.0)
+                return TruncationInt8Codec(fixed_scale=float(trunc_scale))
+            if kind in ("fp8_e4m3", "float8_e4m3", "e4m3"):
+                return TruncationFloat8Codec(layout="e4m3")
+            # Unknown kind => disable rather than crash experiments.
+            return None
+
+
+        try:
+            if self._quantize_forward:
+                self._fwd_codec = _build_codec(self._forward_quantization, scale_key_prefix="forward")
+                if self._fwd_codec is None:
+                    self._quantize_forward = False
+            if self._quantize_backward:
+                self._bwd_codec = _build_codec(self._backward_quantization, scale_key_prefix="backward")
+                if self._bwd_codec is None:
+                    self._quantize_backward = False
+        except Exception:
+            # If codec setup fails for any reason, fall back to no-op.
+            self._quantize_forward = False
+            self._quantize_backward = False
+            self._fwd_codec = None
+            self._bwd_codec = None
+
         self.com_manager = MpiCommunicationManager(comm, rank, size, node_type=node_type)
         self.com_manager.add_observer(self)
+
+    def _is_quant_payload(self, obj) -> bool:
+        if not isinstance(obj, dict):
+            return False
+        # Prefer explicit codec marker, but also accept minimal required keys.
+        if obj.get("codec") in (
+            "fp8_e4m3",
+            "dynamic_symmetric_int8",
+            "trunc_bits_int8",
+            "trunc_scale_int8",
+            "minmax_affine_uint8",
+            "uniform_asymmetric_uint8",
+        ):
+            return True
+        return "q" in obj and "scale" in obj and "zero_point" in obj
+
+    def _encode_tensor_obj(self, obj, codec, *, preserve_second_if_pair: bool):
+        if codec is None:
+            return obj
+
+        if isinstance(obj, torch.Tensor):
+            # Only quantize floating-point tensors (activations). Labels are typically int64.
+            try:
+                if obj.dtype is not None and obj.dtype.is_floating_point:
+                    return codec.encode(obj)
+            except Exception:
+                pass
+            return obj
+
+        # Common pattern across algorithms: (acts, labels) stored under the
+        # "activations" key. When requested, quantize acts only; never touch labels.
+        if isinstance(obj, tuple):
+            if preserve_second_if_pair and len(obj) == 2:
+                return (self._encode_tensor_obj(obj[0], codec, preserve_second_if_pair=preserve_second_if_pair), obj[1])
+            return tuple(self._encode_tensor_obj(v, codec, preserve_second_if_pair=preserve_second_if_pair) for v in obj)
+        if isinstance(obj, list):
+            if preserve_second_if_pair and len(obj) == 2:
+                return [self._encode_tensor_obj(obj[0], codec, preserve_second_if_pair=preserve_second_if_pair), obj[1]]
+            return [self._encode_tensor_obj(v, codec, preserve_second_if_pair=preserve_second_if_pair) for v in obj]
+        if isinstance(obj, dict):
+            # Avoid double-encoding if someone already sent a payload.
+            if self._is_quant_payload(obj):
+                return obj
+            return {k: self._encode_tensor_obj(v, codec, preserve_second_if_pair=preserve_second_if_pair) for k, v in obj.items()}
+        return obj
+
+    def _decode_tensor_obj(self, obj, codec, *, preserve_second_if_pair: bool):
+        if codec is None:
+            return obj
+
+        if self._is_quant_payload(obj):
+            try:
+                # Decode onto the receiver's configured device when possible.
+                # Falls back to CPU if args['device'] is missing/unavailable.
+                dev = None
+                try:
+                    dev = self.args["device"]
+                except Exception:
+                    dev = None
+                return codec.decode(obj, device=(dev if dev is not None else "cpu"), dtype=torch.float32)
+            except Exception:
+                return obj
+
+        if isinstance(obj, tuple):
+            if preserve_second_if_pair and len(obj) == 2:
+                return (self._decode_tensor_obj(obj[0], codec, preserve_second_if_pair=preserve_second_if_pair), obj[1])
+            return tuple(self._decode_tensor_obj(v, codec, preserve_second_if_pair=preserve_second_if_pair) for v in obj)
+        if isinstance(obj, list):
+            if preserve_second_if_pair and len(obj) == 2:
+                return [self._decode_tensor_obj(obj[0], codec, preserve_second_if_pair=preserve_second_if_pair), obj[1]]
+            return [self._decode_tensor_obj(v, codec, preserve_second_if_pair=preserve_second_if_pair) for v in obj]
+        if isinstance(obj, dict):
+            return {k: self._decode_tensor_obj(v, codec, preserve_second_if_pair=preserve_second_if_pair) for k, v in obj.items()}
+        return obj
+
+    def _maybe_quantize_message(self, message) -> None:
+        try:
+            params = message.get_params() if hasattr(message, "get_params") else None
+        except Exception:
+            params = None
+        if not isinstance(params, dict):
+            return
+        # Forward-path activations
+        if self._quantize_forward and self._fwd_codec is not None and "activations" in params:
+            try:
+                params["activations"] = self._encode_tensor_obj(
+                    params["activations"],
+                    self._fwd_codec,
+                    preserve_second_if_pair=True,
+                )
+            except Exception:
+                pass
+        # Backward-path gradients
+        if self._quantize_backward and self._bwd_codec is not None and "activation_grads" in params:
+            try:
+                params["activation_grads"] = self._encode_tensor_obj(
+                    params["activation_grads"],
+                    self._bwd_codec,
+                    preserve_second_if_pair=False,
+                )
+            except Exception:
+                pass
+
+    def _maybe_dequantize_message(self, msg_params) -> None:
+        try:
+            params = msg_params.get_params() if hasattr(msg_params, "get_params") else None
+        except Exception:
+            params = None
+        if not isinstance(params, dict):
+            return
+        # Forward-path activations
+        if self._quantize_forward and self._fwd_codec is not None and "activations" in params:
+            try:
+                params["activations"] = self._decode_tensor_obj(
+                    params["activations"],
+                    self._fwd_codec,
+                    preserve_second_if_pair=True,
+                )
+            except Exception:
+                pass
+        # Backward-path gradients
+        if self._quantize_backward and self._bwd_codec is not None and "activation_grads" in params:
+            try:
+                params["activation_grads"] = self._decode_tensor_obj(
+                    params["activation_grads"],
+                    self._bwd_codec,
+                    preserve_second_if_pair=False,
+                )
+            except Exception:
+                pass
 
     def _safe_msg_type_and_size(self, message) -> Tuple[Optional[int], int]:
         """Best-effort extraction of (msg_type, size_bytes) without raising."""
@@ -520,6 +785,9 @@ class MessageManager(Observer):
         except Exception:
             pass
 
+        # Decode activations after comm accounting, before dispatch to algorithm handlers.
+        self._maybe_dequantize_message(msg_params)
+
         handler = self._message_handlers.get(msg_type)
         if handler is None:
             logging.debug("No handler for msg_type=%s on rank=%s", msg_type, self.rank)
@@ -527,6 +795,9 @@ class MessageManager(Observer):
         handler(msg_params)
 
     def send_message(self, message, priority: Optional[int] = None):
+        # Quantize activations before accounting and enqueueing for send.
+        self._maybe_quantize_message(message)
+
         # Per-msg_type byte accounting (send side) at the central send entrypoint.
         try:
             msg_type, size = self._safe_msg_type_and_size(message)
