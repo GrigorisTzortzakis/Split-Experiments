@@ -25,6 +25,7 @@ Optional summary:
 from __future__ import annotations
 
 import argparse
+import ast
 import math
 import re
 from dataclasses import dataclass
@@ -120,6 +121,703 @@ def _safe_float(s: str) -> float:
         return float(s)
     except Exception:
         return float("nan")
+
+
+# -----------------------------
+# Data split (from logs): samples per client
+# -----------------------------
+
+
+_LOCAL_SAMPLES_RE = re.compile(r"rank\s*=\s*(?P<rank>\d+)\s*,\s*local_sample_number\s*=\s*(?P<n>\d+)")
+_DT_TAG_RE = re.compile(r"_(?P<d>\d{2}-\d{2}-\d{4})_(?P<t>\d{2}-\d{2})")
+_PC_TAG_RE = re.compile(r"_pc(?P<n>\d+)", re.IGNORECASE)
+_SEED_RE = re.compile(r"\bseed\b\s*[:=]\s*(?P<seed>-?\d+)", re.IGNORECASE)
+_TRAINDATA_CLS_COUNTS_RE = re.compile(r"traindata_cls_counts:\s*(?P<d>\{.*\})")
+_CLASS_PER_CLIENT_RE = re.compile(r"class_per_client:\s*(?P<l>\[\[.*\]\])")
+
+
+def _extract_run_datetime_from_stem(stem: str) -> Optional[datetime]:
+    m = _DT_TAG_RE.search(stem)
+    if not m:
+        return None
+    try:
+        return datetime.strptime(f"{m.group('d')} {m.group('t')}", "%d-%m-%Y %H-%M")
+    except Exception:
+        return None
+
+
+def _parse_local_samples_from_log(log_path: Path) -> Dict[int, int]:
+    """Return mapping of MPI rank -> local sample number (clients are ranks 1..N)."""
+    out: Dict[int, int] = {}
+    try:
+        txt = log_path.read_text(errors="ignore")
+    except Exception:
+        return out
+
+    for line in txt.splitlines():
+        m = _LOCAL_SAMPLES_RE.search(line)
+        if not m:
+            continue
+        r = int(m.group("rank"))
+        n = int(m.group("n"))
+        # Keep the last occurrence per rank.
+        out[r] = n
+    return out
+
+
+def _try_parse_traindata_cls_counts_from_log(log_path: Path) -> Optional[Dict[int, Dict[int, int]]]:
+    """Parse DataPartitioner `traindata_cls_counts` dict from log if present.
+
+    Expected shape:
+      {partition_id: {class_label: count, ...}, ...}
+    """
+    try:
+        txt = log_path.read_text(errors="ignore")
+    except Exception:
+        return None
+
+    last_dict: Optional[str] = None
+    for line in txt.splitlines():
+        m = _TRAINDATA_CLS_COUNTS_RE.search(line)
+        if not m:
+            continue
+        last_dict = m.group("d")
+
+    if not last_dict:
+        return None
+
+    try:
+        raw = ast.literal_eval(last_dict)
+    except Exception:
+        return None
+
+    if not isinstance(raw, dict):
+        return None
+
+    out: Dict[int, Dict[int, int]] = {}
+    for k, v in raw.items():
+        try:
+            pid = int(k)
+        except Exception:
+            continue
+        if not isinstance(v, dict):
+            continue
+        inner: Dict[int, int] = {}
+        for kk, vv in v.items():
+            try:
+                inner[int(kk)] = int(vv)
+            except Exception:
+                continue
+        out[pid] = inner
+    return out
+
+
+def _try_parse_class_per_client_from_log(log_path: Path) -> Optional[List[List[int]]]:
+    """Parse DataPartitioner `class_per_client` list from log if present."""
+    try:
+        txt = log_path.read_text(errors="ignore")
+    except Exception:
+        return None
+
+    last_list: Optional[str] = None
+    for line in txt.splitlines():
+        m = _CLASS_PER_CLIENT_RE.search(line)
+        if not m:
+            continue
+        last_list = m.group("l")
+
+    if not last_list:
+        return None
+
+    try:
+        raw = ast.literal_eval(last_list)
+    except Exception:
+        return None
+
+    if not isinstance(raw, list):
+        return None
+
+    out: List[List[int]] = []
+    for item in raw:
+        if not isinstance(item, (list, tuple)):
+            return None
+        labels: List[int] = []
+        for x in item:
+            try:
+                labels.append(int(x))
+            except Exception:
+                return None
+        out.append(labels)
+    return out
+
+
+def _extract_partition_client_number_from_stem(stem: str) -> Optional[int]:
+    m = _PC_TAG_RE.search(stem)
+    if not m:
+        return None
+    try:
+        n = int(m.group("n"))
+    except Exception:
+        return None
+    return n if n > 0 else None
+
+
+def _try_parse_seed_from_log(log_path: Path) -> Optional[int]:
+    try:
+        txt = log_path.read_text(errors="ignore")
+    except Exception:
+        return None
+    m = _SEED_RE.search(txt)
+    if not m:
+        return None
+    try:
+        return int(m.group("seed"))
+    except Exception:
+        return None
+
+
+def _partition_settings_from_scenario(scenario: str) -> Tuple[str, Optional[float]]:
+    """Return (partition_method, partition_alpha)."""
+    if scenario == "iid":
+        return "homo", None
+    # IMPORTANT: handle 'non_iid_alpha*' before 'non_iid_a*' because
+    # 'non_iid_alpha0' also starts with 'non_iid_a'.
+    if scenario.startswith("non_iid_alpha"):
+        suffix = scenario.split("non_iid_alpha", 1)[1]
+        try:
+            a = float(suffix)
+        except Exception:
+            # If we can't parse it, assume extreme non-IID.
+            return "alpha0", 0.0
+        if a <= 0.0:
+            return "alpha0", 0.0
+        # If the repo ever logs non-zero `_alphaX` in filenames, treat it like Dirichlet.
+        return "hetero", float(a)
+    if scenario.startswith("non_iid_a"):
+        a = scenario.split("non_iid_a", 1)[1]
+        try:
+            return "hetero", float(a)
+        except Exception:
+            return "hetero", None
+    # Fallback to IID
+    return "homo", None
+
+
+def _scenario_title(scenario: str) -> str:
+    if scenario == "iid":
+        return "homogeneous partition"
+    if scenario.startswith("non_iid_a"):
+        a = scenario.split("non_iid_a", 1)[1]
+        return f"Dirichlet non-IID (a={a})"
+    if scenario == "non_iid_alpha0":
+        return "alpha0 / extreme non-IID"
+    return scenario
+
+
+def plot_data_split_samples_per_client_from_logs(
+    *,
+    log_files: List[Path],
+    plots_root: Path,
+    group: str,
+    clients_wanted: List[int],
+    cfg: "object",
+    dataset: str,
+    partition_client_number_fallback: int,
+    seed_fallback: Optional[int],
+) -> List[Path]:
+    """Write one figure per (scenario, client-count) under mixed_clients/<scenario>/.
+
+    Figure layout matches the requested style:
+    - one figure per client-count (e.g. data_split_10c.png)
+    - blue bars
+    - value labels on top of bars
+    """
+    if not log_files:
+        return []
+
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    project_root = Path(__file__).resolve().parents[1]
+    _ensure_data_dir_for_cfg(cfg, project_root=project_root)
+
+    # Load labels once (used to compute per-client label counts).
+    import numpy as np
+
+    y_train = _load_train_labels_for_split(cfg, dataset=dataset)
+    y_arr = np.asarray(y_train)
+    classes = np.unique(y_arr)
+    # In this repo, labels are typically 0..K-1.
+    # If not, we still plot by these actual class ids.
+    class_labels = [int(x) for x in classes.tolist()]
+    class_to_col = {int(c): i for i, c in enumerate(class_labels)}
+    n_classes = int(len(class_labels))
+
+    # Group logs by scenario and by client count.
+    by_scenario: Dict[str, Dict[int, List[Path]]] = {}
+    for lp in log_files:
+        stem = lp.stem
+        n_clients = _extract_client_count_from_stem(stem)
+        if n_clients is None:
+            continue
+        scenario = _scenario_key_from_stem(stem)
+        by_scenario.setdefault(scenario, {}).setdefault(int(n_clients), []).append(lp)
+
+    written: List[Path] = []
+    clients_wanted_sorted = [int(x) for x in clients_wanted]
+
+    for scenario, by_clients in sorted(by_scenario.items()):
+        # Pick one log per requested client count (prefer newest timestamp in filename).
+        selected: List[Tuple[int, Path]] = []
+        for n in clients_wanted_sorted:
+            cands = by_clients.get(int(n), [])
+            if not cands:
+                continue
+            # newest by embedded timestamp, fallback to mtime.
+            def _key(p: Path):
+                dt = _extract_run_datetime_from_stem(p.stem)
+                if dt is not None:
+                    return (1, dt)
+                try:
+                    return (0, datetime.fromtimestamp(p.stat().st_mtime))
+                except Exception:
+                    return (0, datetime.min)
+
+            chosen = sorted(cands, key=_key)[-1]
+            selected.append((int(n), chosen))
+
+        if not selected:
+            continue
+
+        # Each requested client-count becomes its own separate picture.
+        cmap_name = "tab10" if n_classes <= 10 else "tab20"
+        cmap = plt.get_cmap(cmap_name)
+        colors = [cmap(i % cmap.N) for i in range(n_classes)]
+
+        out_dir = plots_root / group / "mixed_clients" / scenario
+        out_dir.mkdir(parents=True, exist_ok=True)
+
+        for n_clients, lp in selected:
+            # Top plot values from logs (with fallback).
+            # Some logs may miss ranks (e.g. if a client didn't print the line);
+            # falling back to reconstructed totals avoids misleading zero bars.
+            rank_to_n = _parse_local_samples_from_log(lp)
+
+            # Bottom plot values: prefer *log-truth* if available, otherwise reconstruct.
+            label_counts_source = "reconstructed"
+            label_counts: "np.ndarray"
+
+            part_method, part_alpha = _partition_settings_from_scenario(scenario)
+            traindata_cls_counts = _try_parse_traindata_cls_counts_from_log(lp)
+            class_per_client = _try_parse_class_per_client_from_log(lp)
+
+            can_use_log_label_counts = False
+            if traindata_cls_counts is not None:
+                # This is the most reliable: explicit per-partition per-class counts.
+                label_counts = np.zeros((int(n_clients), int(n_classes)), dtype=np.int64)
+                for rank in range(1, int(n_clients) + 1):
+                    pid = int(rank) - 1
+                    per_class = traindata_cls_counts.get(pid, {})
+                    for cls_id, cnt in per_class.items():
+                        col = class_to_col.get(int(cls_id))
+                        if col is None:
+                            continue
+                        label_counts[pid, int(col)] = int(cnt)
+                can_use_log_label_counts = True
+                label_counts_source = "log"
+            elif part_method in {"alpha0", "extreme_noniid", "disjoint_labels"} and class_per_client is not None:
+                # For alpha0/extreme non-IID, logs include label assignment (`class_per_client`).
+                # If each active partition maps to exactly 1 label, we can derive per-label counts
+                # from `local_sample_number` exactly (no reconstruction / seeds).
+                ok_single = True
+                for rank in range(1, int(n_clients) + 1):
+                    pid = int(rank) - 1
+                    if pid < 0 or pid >= len(class_per_client):
+                        ok_single = False
+                        break
+                    labels_for_pid = class_per_client[pid]
+                    if len(labels_for_pid) != 1:
+                        ok_single = False
+                        break
+                if ok_single:
+                    label_counts = np.zeros((int(n_clients), int(n_classes)), dtype=np.int64)
+                    for rank in range(1, int(n_clients) + 1):
+                        pid = int(rank) - 1
+                        lbl = int(class_per_client[pid][0])
+                        col = class_to_col.get(lbl)
+                        if col is None:
+                            continue
+                        # Prefer explicit per-rank sample count from log.
+                        # If the log is missing the line for a rank, alpha0 still lets us infer
+                        # the exact count deterministically: it's just the total number of samples
+                        # of that label in the dataset.
+                        n_samples = rank_to_n.get(rank)
+                        if n_samples is None:
+                            try:
+                                n_samples = int((y_arr == int(lbl)).sum())
+                            except Exception:
+                                n_samples = 0
+                        label_counts[pid, int(col)] = int(n_samples)
+                    can_use_log_label_counts = True
+                    label_counts_source = "log"
+
+            if not can_use_log_label_counts:
+                pc = _extract_partition_client_number_from_stem(lp.stem)
+                if pc is None:
+                    pc = int(partition_client_number_fallback)
+
+                seed_run = _try_parse_seed_from_log(lp)
+                seed_use = seed_run if seed_run is not None else seed_fallback
+
+                _seed_all(seed_use)
+                cfg["client_number"] = int(n_clients)
+                cfg["partition_client_number"] = int(pc)
+                cfg["partition_method"] = str(part_method)
+                if part_alpha is not None:
+                    cfg["partition_alpha"] = float(part_alpha)
+
+                net_dataidx_map = _partition_indices_for_split(cfg, dataset=dataset)
+                label_counts = np.zeros((int(n_clients), int(n_classes)), dtype=np.int64)
+                for cid in range(int(n_clients)):
+                    idxs = net_dataidx_map.get(cid, [])
+                    if not idxs:
+                        continue
+                    ys = y_arr[np.asarray(idxs, dtype=np.int64)]
+                    vals, freqs = np.unique(ys, return_counts=True)
+                    for v, f in zip(vals.tolist(), freqs.tolist()):
+                        col = class_to_col.get(int(v))
+                        if col is None:
+                            continue
+                        label_counts[cid, int(col)] = int(f)
+
+            max_y_labels = int(label_counts.sum(axis=1).max()) if label_counts.size else 0
+
+            # Reconstructed totals (always available).
+            recon_totals = [int(x) for x in label_counts.sum(axis=1).tolist()] if label_counts.size else [0] * int(n_clients)
+            missing_ranks = [r for r in range(1, int(n_clients) + 1) if int(r) not in rank_to_n]
+            # Prefer log counts where present, otherwise use reconstructed totals.
+            sample_counts = [int(rank_to_n.get(r, recon_totals[i])) for i, r in enumerate(range(1, int(n_clients) + 1))]
+            max_y_samples = max(sample_counts) if sample_counts else 0
+
+            # Build a per-case figure: 2 rows (samples + label composition).
+            fig, (ax_top, ax_bot) = plt.subplots(2, 1, figsize=(9.6, 6.2), squeeze=True)
+            supt = f"{group} dataset split ({_scenario_title(scenario)}) — {int(n_clients)} clients"
+            fig.suptitle(supt, fontsize=12)
+
+            xs = list(range(1, int(n_clients) + 1))
+
+            # Top: samples per client.
+            bars = ax_top.bar(xs, sample_counts, color="#1f77b4")
+            if missing_ranks:
+                miss = ",".join(str(x) for x in missing_ranks)
+                ax_top.set_title(f"{lp.name} (missing ranks in log: {miss})", fontsize=10)
+            else:
+                ax_top.set_title(lp.name, fontsize=10)
+            ax_top.set_xlabel("Client")
+            ax_top.set_ylabel("samples")
+            ax_top.set_xticks(xs)
+            ax_top.set_ylim(0, int(max_y_samples * 1.12) if max_y_samples > 0 else 1)
+            ax_top.grid(axis="y", alpha=0.25)
+            for b in bars:
+                h = int(b.get_height())
+                ax_top.text(
+                    b.get_x() + b.get_width() / 2,
+                    h + max(10, int(max_y_samples * 0.01)),
+                    f"{h}",
+                    ha="center",
+                    va="bottom",
+                    fontsize=8,
+                )
+
+            # Bottom: stacked label counts.
+            ax_bot.set_title(f"label composition ({label_counts_source})", fontsize=10)
+            bottoms = np.zeros(int(n_clients), dtype=np.int64)
+            handles = []
+            labels = []
+            for j, lbl in enumerate(class_labels):
+                vals = label_counts[:, j]
+                hbars = ax_bot.bar(
+                    xs,
+                    vals,
+                    bottom=bottoms,
+                    color=colors[j],
+                    edgecolor="white",
+                    linewidth=0.3,
+                    label=str(lbl),
+                )
+
+                for x, v, btm in zip(xs, vals.tolist(), bottoms.tolist()):
+                    if int(v) <= 0:
+                        continue
+                    thresh = max(12, int(max_y_labels * 0.08)) if max_y_labels > 0 else 12
+                    if int(v) < thresh:
+                        continue
+                    ax_bot.text(
+                        x,
+                        int(btm) + int(v) / 2,
+                        f"{lbl}:{int(v)}",
+                        ha="center",
+                        va="center",
+                        fontsize=6,
+                    )
+
+                bottoms = bottoms + vals
+                handles.append(hbars[0])
+                labels.append(str(lbl))
+
+            ax_bot.set_xlabel("Client")
+            ax_bot.set_ylabel("samples by label")
+            ax_bot.set_xticks(xs)
+            ax_bot.set_ylim(0, int(max_y_labels * 1.12) if max_y_labels > 0 else 1)
+            ax_bot.grid(axis="y", alpha=0.20)
+
+            ax_bot.legend(
+                handles,
+                labels,
+                title="Label",
+                loc="upper center",
+                bbox_to_anchor=(0.5, -0.22),
+                ncol=min(len(labels), 10),
+                framealpha=0.95,
+                fontsize=8,
+            )
+
+            fig.tight_layout(rect=[0, 0.06, 1, 0.94])
+
+            out_path = out_dir / f"data_split_{int(n_clients)}c.png"
+            fig.savefig(out_path, dpi=180)
+            plt.close(fig)
+            written.append(out_path)
+
+    return written
+
+
+# -----------------------------
+# Data split (label distribution) plots
+# -----------------------------
+
+
+def _seed_all(seed: Optional[int]) -> None:
+    if seed is None:
+        return
+    seed_i = int(seed)
+    if seed_i < 0:
+        return
+
+    import random
+
+    random.seed(seed_i)
+    try:
+        import numpy as np
+
+        np.random.seed(seed_i)
+    except Exception:
+        pass
+
+    try:
+        import torch
+
+        torch.manual_seed(seed_i)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed_all(seed_i)
+    except Exception:
+        # Torch isn't strictly required for producing the split indices.
+        pass
+
+
+def _ensure_data_dir_for_cfg(cfg: "object", *, project_root: Path) -> None:
+    """Mirror setup/main.py: keep dataset root under Split-Framework/datasets/downloads by default."""
+    data_dir = None
+    try:
+        data_dir = cfg["dataDir"]
+    except Exception:
+        data_dir = None
+    if not data_dir:
+        data_dir = str(project_root / "datasets" / "downloads")
+    p = Path(str(data_dir))
+    if not p.is_absolute():
+        p = (project_root / p).resolve()
+    try:
+        cfg["dataDir"] = str(p)
+    except Exception:
+        pass
+
+
+def _load_train_labels_for_split(cfg: "object", *, dataset: str):
+    from datasets.Dataset_Loader import TorchvisionDatasetController
+
+    ds = TorchvisionDatasetController(parse=cfg, dataset_name=str(dataset).lower())
+    _x_train, y_train, _x_test, _y_test = ds.loadData()
+
+    # y_train is np.ndarray for MNIST and torch.Tensor for CIFAR in this repo.
+    if hasattr(y_train, "cpu"):
+        y_train = y_train.cpu().numpy()
+    return y_train
+
+
+def _partition_indices_for_split(cfg: "object", *, dataset: str) -> Dict[int, List[int]]:
+    from datasets.Dataset_Loader import TorchvisionDatasetController
+
+    ds = TorchvisionDatasetController(parse=cfg, dataset_name=str(dataset).lower())
+    _x_train, _y_train, _x_test, _y_test, net_dataidx_map, _cls_counts = ds.partition_data()
+
+    out: Dict[int, List[int]] = {}
+    for k, v in net_dataidx_map.items():
+        # v can be np.ndarray or list
+        if hasattr(v, "tolist"):
+            out[int(k)] = [int(x) for x in v.tolist()]
+        else:
+            out[int(k)] = [int(x) for x in list(v)]
+    return out
+
+
+def _client_class_counts_for_split(*, y_train, net_dataidx_map: Dict[int, List[int]], active_clients: int, n_classes: int):
+    import numpy as np
+
+    m = np.zeros((int(active_clients), int(n_classes)), dtype=np.int64)
+    y_arr = np.asarray(y_train)
+    for cid in range(int(active_clients)):
+        idxs = net_dataidx_map.get(cid, [])
+        if not idxs:
+            continue
+        ys = y_arr[np.asarray(idxs, dtype=np.int64)]
+        for c in range(int(n_classes)):
+            m[cid, c] = int(np.sum(ys == c))
+    return m
+
+
+def _row_normalize_for_split(counts):
+    import numpy as np
+
+    denom = counts.sum(axis=1, keepdims=True).astype(np.float64)
+    denom[denom == 0] = 1.0
+    return counts.astype(np.float64) / denom
+
+
+def plot_mixed_clients_data_splits(
+    *,
+    cfg: "object",
+    dataset: str,
+    group: str,
+    plots_root: Path,
+    partition_client_number: int,
+    active_clients_list: List[int],
+    alphas: List[float],
+    include_alpha0: bool,
+    seed: Optional[int],
+) -> List[Path]:
+    """Write one data split plot per scenario under results/plots/<group>/mixed_clients/<scenario>/data_split.png."""
+    import numpy as np
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    project_root = Path(__file__).resolve().parents[1]
+    _ensure_data_dir_for_cfg(cfg, project_root=project_root)
+    _seed_all(seed)
+
+    cfg["partition_client_number"] = int(partition_client_number)
+
+    y_train = _load_train_labels_for_split(cfg, dataset=dataset)
+    n_classes = int(len(np.unique(np.asarray(y_train))))
+
+    # Scenario specs
+    cases: List[Tuple[str, Dict[str, object]]] = [("iid", {"partition_method": "homo"})]
+    for a in alphas:
+        a_f = float(a)
+        cases.append((f"non_iid_a{a_f:g}", {"partition_method": "hetero", "partition_alpha": a_f}))
+    if include_alpha0:
+        cases.append(("non_iid_alpha0", {"partition_method": "alpha0", "partition_alpha": 0.0}))
+
+    written: List[Path] = []
+
+    for scenario, override in cases:
+        # Generate one figure PER active-client-count (matches the style you shared).
+        active_list_sorted = sorted(set(int(x) for x in active_clients_list))
+        largest_active = max(active_list_sorted) if active_list_sorted else None
+
+        # Use Matplotlib tab colors like your example.
+        cmap_name = "tab10" if n_classes <= 10 else "tab20"
+        cmap = plt.get_cmap(cmap_name)
+        colors = [cmap(i % cmap.N) for i in range(n_classes)]
+
+        for active_clients in active_list_sorted:
+            cfg["client_number"] = int(active_clients)
+            for k, v in override.items():
+                cfg[str(k)] = v
+
+            net_dataidx_map = _partition_indices_for_split(cfg, dataset=dataset)
+            counts = _client_class_counts_for_split(
+                y_train=y_train,
+                net_dataidx_map=net_dataidx_map,
+                active_clients=int(active_clients),
+                n_classes=n_classes,
+            )
+
+            x = np.arange(1, int(active_clients) + 1)
+            bottom = np.zeros(int(active_clients), dtype=np.int64)
+
+            fig, ax = plt.subplots(figsize=(12.5, 5.3))
+            handles = []
+            labels = []
+            for cls in range(n_classes):
+                vals = counts[:, cls]
+                h = ax.bar(
+                    x,
+                    vals,
+                    bottom=bottom,
+                    color=colors[cls],
+                    edgecolor="white",
+                    linewidth=0.4,
+                    label=str(cls),
+                )
+                bottom = bottom + vals
+                handles.append(h[0])
+                labels.append(str(cls))
+
+            ax.set_title(f"Label distribution (stacked bars) — {active_clients}c {scenario}")
+            ax.set_xlabel("Client")
+            ax.set_ylabel("Samples (count)")
+            ax.set_xticks(x)
+            ax.grid(axis="y", alpha=0.25)
+
+            # Legend below plot, like the example.
+            leg = ax.legend(
+                handles,
+                labels,
+                title="Label",
+                loc="upper center",
+                bbox_to_anchor=(0.5, -0.16),
+                ncol=min(n_classes, 10),
+                framealpha=0.95,
+                fontsize=9,
+            )
+            plt.setp(leg.get_title(), fontsize=10)
+
+            fig.subplots_adjust(left=0.07, right=0.99, top=0.90, bottom=0.28)
+
+            out_dir = plots_root / group / "mixed_clients" / scenario
+            out_dir.mkdir(parents=True, exist_ok=True)
+
+            out_path = out_dir / f"data_split_{int(active_clients)}c.png"
+            fig.savefig(out_path, dpi=180)
+            plt.close(fig)
+            written.append(out_path)
+
+            # Also write/overwrite data_split.png for the largest active client count.
+            if largest_active is not None and int(active_clients) == int(largest_active):
+                out_path2 = out_dir / "data_split.png"
+                # Re-save the same figure bytes by copying from disk (keeps this simple).
+                try:
+                    out_path2.write_bytes(out_path.read_bytes())
+                    written.append(out_path2)
+                except Exception:
+                    pass
+
+    return written
 
 
 def parse_metrics(log_text: str) -> List[MetricPoint]:
@@ -961,6 +1659,52 @@ def _individual_clients_dir() -> str:
 
 def main(argv: Optional[List[str]] = None) -> int:
     parser = argparse.ArgumentParser(description="Plot Split-Framework .log files (global epochs)")
+    parser.add_argument(
+        "--data-splits",
+        action="store_true",
+        help="Write mixed-clients data split plots (from logs) under results/plots/<variant>/mixed_clients/<scenario>/data_split_<Nc>.png",
+    )
+    parser.add_argument(
+        "--config",
+        default=str(Path("setup/config/config.yaml")),
+        help="(Unused for --data-splits now; kept for backwards compatibility)",
+    )
+    parser.add_argument(
+        "--dataset",
+        default=None,
+        help="(Unused for --data-splits now; kept for backwards compatibility)",
+    )
+    parser.add_argument(
+        "--partition-client-number",
+        type=int,
+        default=10,
+        help="(Unused for --data-splits now; kept for backwards compatibility)",
+    )
+    parser.add_argument(
+        "--split-clients",
+        type=int,
+        nargs="+",
+        default=[1, 5, 10],
+        help="Client counts to include in each data split figure (default: 1 5 10).",
+    )
+    parser.add_argument(
+        "--split-alphas",
+        type=float,
+        nargs="*",
+        default=[0.1, 0.5],
+        help="(Unused for --data-splits now; kept for backwards compatibility)",
+    )
+    parser.add_argument(
+        "--include-alpha0",
+        action="store_true",
+        help="(Unused for --data-splits now; alpha0 is inferred from filenames)",
+    )
+    parser.add_argument(
+        "--split-seed",
+        type=int,
+        default=None,
+        help="(Unused for --data-splits now; kept for backwards compatibility)",
+    )
     parser.add_argument("--logs-root", default="results/logs", help="Root folder containing .log files")
     parser.add_argument("--plots-root", default="results/plots", help="Output root for plots")
     parser.add_argument(
@@ -984,6 +1728,59 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     logs_root = Path(args.logs_root)
     plots_root = Path(args.plots_root)
+
+    # --data-splits mode: generate label-distribution plots without touching logs.
+    if args.data_splits:
+        # We need a variant to locate the right log files.
+        if not args.variant:
+            parser.error("--data-splits requires --variant (e.g., vanilla-lenet)")
+
+        log_files = sorted((logs_root / str(args.variant)).glob("*.log"))
+
+        # Config is used here to reconstruct the per-label split (for the stacked bars).
+        from runtime.config import yaml_config
+
+        cfg_path = Path(str(args.config)).expanduser()
+        cfg = yaml_config.load(str(cfg_path))
+        dataset = str(args.dataset or cfg.get("dataset") or "mnist").lower() if hasattr(cfg, "get") else str(args.dataset or cfg["dataset"] or "mnist").lower()
+
+        # Avoid accidental logging / file writes during plotting.
+        try:
+            cfg["log_save_path"] = "/dev/null"
+        except Exception:
+            pass
+        try:
+            cfg["download"] = False
+        except Exception:
+            pass
+
+        # Seed fallback: prefer CLI, else config.
+        seed_fallback: Optional[int] = None
+        if args.split_seed is not None:
+            seed_fallback = int(args.split_seed)
+            try:
+                cfg["seed"] = int(args.split_seed)
+            except Exception:
+                pass
+        else:
+            try:
+                seed_fallback = int(cfg["seed"])
+            except Exception:
+                seed_fallback = None
+
+        written = plot_data_split_samples_per_client_from_logs(
+            log_files=log_files,
+            plots_root=plots_root,
+            group=str(args.variant),
+            clients_wanted=[int(x) for x in args.split_clients],
+            cfg=cfg,
+            dataset=dataset,
+            partition_client_number_fallback=int(args.partition_client_number),
+            seed_fallback=seed_fallback,
+        )
+        for p in written:
+            print(f"WROTE: {p}")
+        return 0
 
     if args.log_file:
         log_files = [Path(args.log_file)]
