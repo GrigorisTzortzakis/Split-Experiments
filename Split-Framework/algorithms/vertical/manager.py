@@ -1,4 +1,4 @@
-"""Managers (client + server) and message types for `vertical`."""
+﻿"""Managers (client + server) and message types for `vertical`."""
 
 # --- Message types -------------------------------------------------
 class MyMessage(object):
@@ -35,7 +35,7 @@ class MyMessage(object):
 from mpi4py import MPI
 from runtime.MPI.Messaging_MPI import Message, MessageManager
 import logging
-from runtime.log import Log
+from runtime.exports.log import Log
 
 
 class ServerManager(MessageManager):
@@ -57,6 +57,7 @@ class ServerManager(MessageManager):
         message.add_params(MyMessage.MSG_ARG_KEY_GRADS, grads)
         message.add_params(MyMessage.MSG_AGR_KEY_RESULT,
                            (self.trainer.total, self.trainer.correct, self.trainer.val_loss))
+        self.annotate_tensor_distribution_message(message, self.trainer)
         self.send_message(message)
 
     def register_message_receive_handlers(self):
@@ -94,7 +95,7 @@ class ServerManager(MessageManager):
             pass
 
 
-    def handle_message_finish_protocol(self):
+    def handle_message_finish_protocol(self, msg_params=None):
         self.finished_nodes += 1
         if self.finished_nodes == self.trainer.MAX_RANK:
             self.finish()
@@ -104,7 +105,7 @@ import logging
 import torch
 import time
 from runtime.MPI.Messaging_MPI import Message, MessageManager
-from runtime.log import Log
+from runtime.exports.log import Log
 from .client import SplitNNClient
 
 class ClientManager(MessageManager):
@@ -178,8 +179,10 @@ class ClientManager(MessageManager):
         message = Message(MyMessage.MSG_TYPE_C2S_SEND_ACTS, self.rank, receive_id)
         message.add_params(MyMessage.MSG_ARG_KEY_ACTS, (acts, labels))
         message.add_params(MyMessage.MSG_ARG_KEY_PHASE, self.trainer.phase)
+        self.annotate_tensor_distribution_message(message, self.trainer)
         self.send_message(message)
 
     def send_finish_to_server(self, receive_id):
         message = Message(MyMessage.MSG_TYPE_C2S_PROTOCOL_FINISHED, self.rank, receive_id)
         self.send_message(message)
+

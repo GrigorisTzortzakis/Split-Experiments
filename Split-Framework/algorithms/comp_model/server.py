@@ -1,4 +1,4 @@
-"""Server-side model/trainer for the `comp_model` algorithm variant."""
+﻿"""Server-side model/trainer for the `comp_model` algorithm variant."""
 
 import torch
 import torch.nn as nn
@@ -7,7 +7,7 @@ import sys
 
 sys.path.extend("../../../")
 
-from runtime.log import Log
+from runtime.exports.log import Log
 
 class SplitNNServer():
     def __init__(self, args):
@@ -50,3 +50,4 @@ class SplitNNServer():
         self.optimizer.step()
         # self.log.info(self.acts.grad.shape)
         return self.acts.grad
+

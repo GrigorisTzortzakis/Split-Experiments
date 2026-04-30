@@ -1,4 +1,4 @@
-"""Server-side model/trainer for the `parallel_U_Shape` algorithm variant."""
+﻿"""Server-side model/trainer for the `parallel_U_Shape` algorithm variant."""
 
 import logging
 
@@ -10,7 +10,7 @@ from queue import Queue
 
 sys.path.extend("../../../")
 
-from runtime.log import Log
+from runtime.exports.log import Log
 
 
 class SplitNNServer():
@@ -82,3 +82,4 @@ class SplitNNServer():
                 recv_by_type,
             )
         )
+

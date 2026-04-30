@@ -1,0 +1,19 @@
+{
+  "algorithm": "SplitFed",
+  "model": "resnet18",
+  "dataset": "cifar10",
+  "device": "gpu",
+  "partition": "non iid a=0.1",
+  "partition_alpha": "0.1",
+  "clients": 5,
+  "epochs": 48,
+  "batch_size": 128,
+  "split_layer": 1,
+  "lr": "0.01",
+  "seed": 0,
+  "comm_reduction": "arithmetic_conversion",
+  "comm_direction": "forward_backward",
+  "quantization_bits": "dynamic-seperate",
+  "forward_quantization": "int8",
+  "backward_quantization": "int8"
+}

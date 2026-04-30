@@ -1,4 +1,4 @@
-"""Managers (client + server) and message types for `asyVanilla`."""
+﻿"""Managers (client + server) and message types for `asyVanilla`."""
 
 # --- Message types -------------------------------------------------
 class MyMessage(object):
@@ -36,7 +36,7 @@ class MyMessage(object):
 # --- Server manager ------------------------------------------------
 from mpi4py import MPI
 from runtime.MPI.Messaging_MPI import Message, MessageManager
-from runtime.log import Log
+from runtime.exports.log import Log
 
 
 class ServerManager(MessageManager):
@@ -58,6 +58,7 @@ class ServerManager(MessageManager):
         message.add_params(MyMessage.MSG_ARG_KEY_GRADS, grads)
         message.add_params(MyMessage.MSG_AGR_KEY_RESULT,
                            (self.trainer.res_dict[receive_id]))
+        self.annotate_tensor_distribution_message(message, self.trainer)
         self.send_message(message)
 
     def register_message_receive_handlers(self):
@@ -93,7 +94,7 @@ class ServerManager(MessageManager):
                 self.trainer.optimizer.step()
                 self.trainer.optimizer.zero_grad()
 
-    def handle_message_finish_protocol(self):
+    def handle_message_finish_protocol(self, msg_params=None):
         self.finished_nodes += 1
         if self.finished_nodes == self.trainer.MAX_RANK:
             self.finish()
@@ -114,7 +115,7 @@ import logging
 import torch
 import time
 from runtime.MPI.Messaging_MPI import Message, MessageManager
-from runtime.log import Log
+from runtime.exports.log import Log
 from .client import SplitNNClient
 
 class ClientManager(MessageManager):
@@ -195,6 +196,7 @@ class ClientManager(MessageManager):
         message = Message(MyMessage.MSG_TYPE_C2S_SEND_ACTS, self.rank, receive_id)
         message.add_params(MyMessage.MSG_ARG_KEY_ACTS, (acts, labels))
         message.add_params(MyMessage.MSG_ARG_KEY_PHASE, self.trainer.phase)
+        self.annotate_tensor_distribution_message(message, self.trainer)
         self.send_message(message)
 
     def send_finish_to_server(self, receive_id):
@@ -208,3 +210,4 @@ class ClientManager(MessageManager):
 
     def handle_validation_start_sign(self, msg_params):
         self.run_eval()
+

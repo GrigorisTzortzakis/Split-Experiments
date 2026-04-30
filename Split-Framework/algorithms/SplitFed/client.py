@@ -1,7 +1,10 @@
-"""Client-side model/trainer for the `SplitFed` algorithm variant."""
+﻿"""Client-side model/trainer for the `SplitFed` algorithm variant."""
+
+import logging
 
 import torch.optim as optim
-import logging
+
+from runtime.exports.log import Log
 
 
 class SplitNNClient():
@@ -13,21 +16,47 @@ class SplitNNClient():
         self.testloader = args["testloader"]
         self.rank = args["rank"]
         self.MAX_RANK = args["max_rank"]
-        self.node_left = self.MAX_RANK if self.rank == 1 else self.rank - 1
-        self.node_right = 1 if self.rank == self.MAX_RANK else self.rank + 1
+        self.SERVER_RANK = args["server_rank"]
         self.epoch_count = 0
         self.batch_idx = 0
         self.MAX_EPOCH_PER_NODE = args["epochs"]
-        self.SERVER_RANK = args["server_rank"]
-        self.optimizer = optim.Adam(self.model.parameters(),
-                                    lr=args["lr"],
-                                    betas=(0.9, 0.999),
-                                    eps=1e-08,
-                                    weight_decay=0,
-                                    amsgrad=False)
-        self.local_sample_number = len(self.trainloader)
+        self.optimizer = optim.Adam(
+            self.model.parameters(),
+            lr=args["lr"],
+            betas=(0.9, 0.999),
+            eps=1e-08,
+            weight_decay=0,
+            amsgrad=False,
+        )
+        try:
+            self.local_sample_number = len(self.trainloader.dataset)
+        except Exception:
+            self.local_sample_number = len(self.trainloader)
 
         self.device = args["device"]
+        self.phase = "train"
+        self.log = Log(self.__class__.__name__, args)
+        self.log_step = args["log_step"] if args["log_step"] else 50
+        self.reset_local_params()
+
+    def reset_local_params(self):
+        self.total = 0
+        self.correct = 0
+        self.val_loss = 0
+        self.step = 0
+        self.batch_idx = 0
+
+    def write_log(self):
+        if (self.phase == "train" and self.step % self.log_step == 0) or self.phase == "validation":
+            self.log.info(
+                "phase={} acc={} loss={} epoch={} and step={}".format(
+                    self.phase,
+                    self.correct / self.total,
+                    self.val_loss,
+                    self.epoch_count,
+                    self.step,
+                )
+            )
 
     def forward_pass(self):
         inputs, labels = next(self.dataloader)
@@ -41,17 +70,17 @@ class SplitNNClient():
 
     def backward_pass(self, grads):
         self.acts.backward(grads)
-
         self.optimizer.step()
-
-    """
-    If the model has dropout or batch norm layers, switch the model mode appropriately.
-    """
 
     def eval_mode(self):
         self.dataloader = iter(self.testloader)
+        self.phase = "validation"
         self.model.eval()
+        self.reset_local_params()
 
     def train_mode(self):
         self.dataloader = iter(self.trainloader)
+        self.phase = "train"
         self.model.train()
+        self.reset_local_params()
+

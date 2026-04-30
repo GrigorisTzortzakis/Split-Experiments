@@ -1,4 +1,4 @@
-"""Managers (client + server) and message types for `Ushaped`."""
+﻿"""Managers (client + server) and message types for `Ushaped`."""
 
 # --- Message types -------------------------------------------------
 class MyMessage(object):
@@ -80,6 +80,7 @@ class ServerManager(MessageManager):
     def handle_message_validation_over(self, msg_params):
         # logging.warning("over")
         self.trainer.validation_over()
+        self.advance_dynamic_quantization_for_trainer(self.trainer)
 
     def handle_message_finish_protocol(self, msg_params):
         self.finish()
@@ -101,7 +102,7 @@ import torch
 import time
 import sys
 from runtime.MPI.Messaging_MPI import Message, MessageManager
-from runtime.log import Log
+from runtime.exports.log import Log
 
 class ClientManager(MessageManager):
     """
@@ -215,3 +216,4 @@ class ClientManager(MessageManager):
     def send_finish_to_server(self, receive_id):
         message = Message(MyMessage.MSG_TYPE_C2S_PROTOCOL_FINISHED, self.rank, receive_id)
         self.send_message(message)
+

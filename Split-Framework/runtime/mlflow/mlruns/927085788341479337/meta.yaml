@@ -1,0 +1,10 @@
+﻿artifact_location: file:///F:/phd/Split-Experiments/Split-Framework/runtime/mlflow/mlruns/927085788341479337
+creation_time: 1777551414261
+experiment_id: '927085788341479337'
+last_update_time: 1777551414261
+lifecycle_stage: active
+name: FedAvg Acc
+trace_location: null
+workspace: default
+
+

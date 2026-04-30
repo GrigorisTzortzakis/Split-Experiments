@@ -1,1 +1,1 @@
-"""Model architectures split into client/server parts."""
+"""Models package containing the import-based model factory and related utilities."""

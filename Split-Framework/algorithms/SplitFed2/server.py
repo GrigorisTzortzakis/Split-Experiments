@@ -1,4 +1,4 @@
-"""Server-side model/trainer for the `SplitFed2` algorithm variant."""
+﻿"""Server-side model/trainer for the `SplitFed2` algorithm variant."""
 
 import torch
 import torch.nn as nn
@@ -7,7 +7,7 @@ import sys
 
 sys.path.extend("../../../")
 
-from runtime.log import Log
+from runtime.exports.log import Log
 
 
 class SplitNNServer():
@@ -31,8 +31,14 @@ class SplitNNServer():
         self.epoch = 0
         self.log_step = args["log_step"] if args["log_step"] else 50  # Log every N steps.
         self.train_mode()
-        self.optimizer = optim.SGD(self.model.parameters(), args["lr"], momentum=0.9,
-                                   weight_decay=5e-4)
+        self.optimizer = optim.Adam(
+            self.model.parameters(),
+            lr=args["lr"],
+            betas=(0.9, 0.999),
+            eps=1e-08,
+            weight_decay=0,
+            amsgrad=False,
+        )
         self.criterion = nn.CrossEntropyLoss()
 
     def train_mode(self):
@@ -57,7 +63,8 @@ class SplitNNServer():
 
 
     def backward_pass(self):
-        self.loss.backward(retain_graph=True)
+        self.loss.backward()
         self.optimizer.step()
         # self.log.info(self.acts.grad.shape)
         return self.acts.grad
+

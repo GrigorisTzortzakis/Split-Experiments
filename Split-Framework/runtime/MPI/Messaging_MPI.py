@@ -1,4 +1,4 @@
-"""MPI send/receive + message dispatch.
+﻿"""MPI send/receive + message dispatch.
 
 What this file is for:
 - Defines the `Message` container exchanged between ranks.
@@ -14,12 +14,13 @@ from __future__ import annotations
 import ctypes
 import json
 import logging
+import math
 import queue
 import sys
 import threading
 import time
 import traceback
-from typing import Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import torch
 from mpi4py import MPI
@@ -101,6 +102,23 @@ def _get_str_arg(args, key: str, default: str) -> str:
         return default if v is None else str(v)
     except Exception:
         return str(default)
+
+
+def _normalize_dynamic_quantization_mode(raw_value: str) -> str:
+    normalized = str(raw_value or "baseline").strip().lower().replace("_", "-").replace(" ", "-")
+    if normalized in {"dynamic-seperate", "dynamic-separate", "seperate", "separate"}:
+        return "seperate"
+    if normalized in {"dynamic-test-1", "test-1", "test1"}:
+        return "test-1"
+    if normalized in {"dynamic-test-2", "test-2", "test2"}:
+        return "test-2"
+    if normalized in {"dynamic-test-3", "test-3", "test3"}:
+        return "test-3"
+    if normalized in {"dynamic-test-4", "test-4", "test4"}:
+        return "test-4"
+    if normalized in {"dynamic-test-5", "test-5", "test5"}:
+        return "test-5"
+    return "baseline"
 
 
 class Message(object):
@@ -244,6 +262,8 @@ class MPISendThread(threading.Thread):
         self.q = q
         self.total_send_size = 0
         self.tmp_send_size = 0
+        self.total_send_time = 0.0
+        self.tmp_send_time = 0.0
         self.total_send_size_by_type = defaultdict(int)
         self.tmp_send_size_by_type = defaultdict(int)
         self.total_send_size_by_category = defaultdict(int)
@@ -266,7 +286,11 @@ class MPISendThread(threading.Thread):
                     self.tmp_send_size_by_category[msg_cat] += size
                     self.total_send_size_by_category[msg_cat] += size
                     dest_id = msg.get(Message.MSG_ARG_KEY_RECEIVER)
+                    send_started = time.perf_counter()
                     self.comm.send(msg_str, dest=dest_id)
+                    send_elapsed = time.perf_counter() - send_started
+                    self.tmp_send_time += send_elapsed
+                    self.total_send_time += send_elapsed
                 else:
                     time.sleep(0.03)
             except SystemExit:
@@ -306,6 +330,8 @@ class MPIReceiveThread(threading.Thread):
         self.name = name
         self.total_receive_size = 0
         self.tmp_receive_size = 0
+        self.total_receive_time = 0.0
+        self.tmp_receive_time = 0.0
         self.total_receive_size_by_type = defaultdict(int)
         self.tmp_receive_size_by_type = defaultdict(int)
         self.total_receive_size_by_category = defaultdict(int)
@@ -321,7 +347,9 @@ class MPIReceiveThread(threading.Thread):
                     time.sleep(0.01)
                     continue
 
+                recv_started = time.perf_counter()
                 msg_str = self.comm.recv(source=status.Get_source(), tag=status.Get_tag())
+                recv_elapsed = time.perf_counter() - recv_started
 
                 msg = Message()
                 msg.init(msg_str)
@@ -335,6 +363,8 @@ class MPIReceiveThread(threading.Thread):
                 self.total_receive_size_by_type[msg_type] += size
                 self.tmp_receive_size_by_category[msg_cat] += size
                 self.total_receive_size_by_category[msg_cat] += size
+                self.tmp_receive_time += recv_elapsed
+                self.total_receive_time += recv_elapsed
             except SystemExit:
                 break
             except Exception:
@@ -414,6 +444,8 @@ class MpiCommunicationManager:
     def reset_analysis_data(self):
         self.send_thread.tmp_send_size = 0
         self.receive_thread.tmp_receive_size = 0
+        self.send_thread.tmp_send_time = 0.0
+        self.receive_thread.tmp_receive_time = 0.0
         # Reset per-type and per-category rolling (tmp) counters.
         if hasattr(self.send_thread, "tmp_send_size_by_type"):
             self.send_thread.tmp_send_size_by_type = defaultdict(int)
@@ -440,6 +472,14 @@ class MpiCommunicationManager:
     @property
     def total_receive_size(self) -> int:
         return int(getattr(self.receive_thread, "total_receive_size", 0))
+
+    @property
+    def tmp_send_time(self) -> float:
+        return float(getattr(self.send_thread, "tmp_send_time", 0.0))
+
+    @property
+    def tmp_receive_time(self) -> float:
+        return float(getattr(self.receive_thread, "tmp_receive_time", 0.0))
 
     @property
     def total_send_size_by_type(self):
@@ -554,7 +594,7 @@ class MessageManager(Observer):
 
         # Ensure comm breakdown is written into the experiment log file.
         try:
-            from runtime.log import Log
+            from runtime.exports.log import Log
 
             self._comm_log = Log("CommBreakdown", args)
         except Exception:
@@ -567,6 +607,52 @@ class MessageManager(Observer):
         # messages pass through (send_message/receive_message).
         self.bytes_sent_by_type = defaultdict(int)
         self.bytes_received_by_type = defaultdict(int)
+        self._comm_analysis_key = "_comm_analysis"
+        self._epoch_comm_stats = defaultdict(float)
+        self._tensor_distribution_logging = _get_bool_arg(args, "tensor_distribution_logging", True)
+        self._tensor_distribution_log_validation = _get_bool_arg(args, "tensor_distribution_log_validation", False)
+        self._tensor_distribution_logged = set()
+        total_epochs = _get_float_arg(args, "epochs", 0)
+        self._tensor_distribution_samples = self._build_tensor_distribution_samples(int(total_epochs or 0))
+        self._dynamic_quantization = _get_bool_arg(args, "dynamic_quantization", False)
+        raw_dynamic_mode = _get_str_arg(args, "dynamic_quantization_mode", "baseline")
+        self._dynamic_quantization_mode = _normalize_dynamic_quantization_mode(raw_dynamic_mode)
+        self._dynamic_quantization_warmup_epochs = max(0, int(round(_get_float_arg(args, "dynamic_quantization_warmup_epochs", 5.0) or 5.0)))
+        self._dynamic_quantization_baseline_low_scale = float(_get_float_arg(args, "dynamic_quantization_baseline_low_scale", 0.90) or 0.90)
+        self._dynamic_quantization_baseline_high_scale = float(_get_float_arg(args, "dynamic_quantization_baseline_high_scale", 1.00) or 1.00)
+        self._dynamic_quantization_baseline_ema = float(_get_float_arg(args, "dynamic_quantization_baseline_ema", 0.05) or 0.05)
+        self._dynamic_quantization_forward_low_scale = float(
+            _get_float_arg(args, "dynamic_quantization_forward_low_scale", 0.95)
+            or 0.95
+        )
+        self._dynamic_quantization_forward_high_scale = float(
+            _get_float_arg(args, "dynamic_quantization_forward_high_scale", 1.05)
+            or 1.05
+        )
+        self._dynamic_quantization_backward_low_scale = float(
+            _get_float_arg(args, "dynamic_quantization_backward_low_scale", 0.85)
+            or 0.85
+        )
+        self._dynamic_quantization_backward_high_scale = float(
+            _get_float_arg(args, "dynamic_quantization_backward_high_scale", 0.95)
+            or 0.95
+        )
+        self._dynamic_quantization_test3_low_scale = float(
+            _get_float_arg(args, "dynamic_quantization_test3_low_scale", 0.85)
+            or 0.85
+        )
+        self._dynamic_quantization_test3_high_scale = float(
+            _get_float_arg(args, "dynamic_quantization_test3_high_scale", 1.05)
+            or 1.05
+        )
+        self._dynamic_forward_bits_key = "_dynamic_forward_bits"
+        self._dynamic_backward_bits_key = "_dynamic_backward_bits"
+        self._dynamic_epoch_ratio_sum = defaultdict(float)
+        self._dynamic_epoch_ratio_count = defaultdict(int)
+        self._dynamic_epoch_last_seen = {}
+        self._dynamic_baseline_ratio_sum = defaultdict(float)
+        self._dynamic_baseline_ratio_count = defaultdict(int)
+        self._dynamic_baseline_value = {}
 
         # --- Communication compression hooks (forward/backward quantization) ---
         # Backward-compat: `quantize_activations` previously controlled forward-only.
@@ -580,54 +666,829 @@ class MessageManager(Observer):
 
         # Future controller: select codec independently for forward/backward.
         # Supported right now:
-        # - "dynamic_symmetric_int8" (default)
+        # - "dynamic_symmetric_int8" / "int8" -> arithmetic conversion int8
+        # - "dynamic_symmetric_int8_per_channel" / "int8_per_channel" -> arithmetic conversion int8 with per-channel scaling
+        # - global bit width is controlled by args['quantization_bits'] (8 or 4)
         # - "fixed_scale_int8" (uses <prefix>_truncation_scale or truncation_scale)
-        # - "fp8_e4m3" (FP8 E4M3 software codec)
+        # - "fp8_e4m3" (arithmetic conversion FP8 E4M3 software codec)
+        # - "uniform_codebook_uint8" -> codeword-based uniform uint8 quantizer
+        # - "mulaw_codebook_uint8" -> mu-law non-uniform codeword quantizer
+        # - "mulaw_per_channel_codebook_uint8" -> per-channel mu-law non-uniform codeword quantizer
+        # - "non_uniform_loyd_codebook_uint8" -> non-uniform Loyd codeword quantizer
+        # - "non_uniform_loyd_per_channel_codebook_uint8" -> per-channel non-uniform Loyd codeword quantizer
+        # - "trunc_noscale_int8" -> truncation-only int8
         # - "none" (disable for that direction)
         self._forward_quantization = _get_str_arg(args, "forward_quantization", "dynamic_symmetric_int8").strip().lower()
         self._backward_quantization = _get_str_arg(args, "backward_quantization", "dynamic_symmetric_int8").strip().lower()
+        quantization_bits = int(round(_get_float_arg(args, "quantization_bits", 8.0) or 8.0))
+        if quantization_bits not in (4, 8):
+            quantization_bits = 8
 
         self._fwd_codec = None
         self._bwd_codec = None
+        self._fwd_codec_by_bits: Dict[int, Any] = {}
+        self._bwd_codec_by_bits: Dict[int, Any] = {}
+        self._active_forward_bits = quantization_bits
+        self._active_backward_bits = quantization_bits
+        self._probed_forward_epoch: Optional[int] = None
+        self._probed_backward_epoch: Optional[int] = None
 
-        def _build_codec(kind: str, *, scale_key_prefix: str):
+        def _build_codec(kind: str, *, scale_key_prefix: str, bits_override: Optional[int] = None):
             if kind in ("none", "off", "false", "0"):
                 return None
+            codec_bits = quantization_bits if bits_override is None else int(bits_override)
             # Keep imports local so MPI can still run if compression module is absent.
-            from compression.quantization.Truncation import TruncationFloat8Codec, TruncationInt8Codec
+            from compression.quantization.arithmetic_conversion import (
+                PerChannelInt8Codec,
+                TruncationFloat8Codec as ArithmeticFloat8Codec,
+                TruncationInt8Codec as ArithmeticInt8Codec,
+            )
+            from compression.quantization.codeword import (
+                LloydMaxCodebookUInt8Codec,
+                MuLawCodebookUInt8Codec,
+                MuLawPerChannelCodebookUInt8Codec,
+                NonUniformLoydCodebookUInt8Codec,
+                NonUniformLoydPerChannelCodebookUInt8Codec,
+                UniformCodebookUInt8Codec,
+                UniformPerChannelCodebookUInt8Codec,
+            )
+            from compression.quantization.Truncation import TruncationInt8Codec as TruncationInt8Codec
 
             if kind in ("dynamic_symmetric_int8", "dynamic_int8", "int8"):
-                return TruncationInt8Codec()
+                return ArithmeticInt8Codec(num_bits=codec_bits)
+            if kind in ("dynamic_symmetric_int8_per_channel", "dynamic_int8_per_channel", "int8_per_channel", "per_channel_int8"):
+                return PerChannelInt8Codec(num_bits=codec_bits)
             if kind in ("fixed_scale_int8", "fixed_int8"):
-                # Prefer per-direction override key, fall back to shared truncation_scale.
-                trunc_scale = _get_float_arg(args, f"{scale_key_prefix}_truncation_scale", None)
-                if trunc_scale is None:
-                    trunc_scale = _get_float_arg(args, "truncation_scale", 10.0)
-                return TruncationInt8Codec(fixed_scale=float(trunc_scale))
-            if kind in ("fp8_e4m3", "float8_e4m3", "e4m3"):
-                return TruncationFloat8Codec(layout="e4m3")
-            # Unknown kind => disable rather than crash experiments.
-            return None
+                fixed_scale = _get_float_arg(self.args, f"{scale_key_prefix}_truncation_scale", None)
+                if fixed_scale is None:
+                    fixed_scale = _get_float_arg(self.args, "truncation_scale", None)
+                return ArithmeticInt8Codec(fixed_scale=fixed_scale, num_bits=codec_bits)
+            if kind in ("fp8_e4m3", "float8_e4m3", "e4m3", "float8"):
+                return ArithmeticFloat8Codec(layout=("e2m1" if codec_bits == 4 else "e4m3"))
+            if kind in ("uniform_codebook_uint8", "uniform_codeword_uint8", "codeword_uniform_uint8", "codeword_uniform", "uniform"):
+                return UniformCodebookUInt8Codec(num_bits=codec_bits)
+            if kind in ("uniform_per_channel_codebook_uint8", "uniform_per_channel_uint8", "codeword_uniform_per_channel_uint8", "codeword_uniform_per_channel", "uniform_per_channel"):
+                return UniformPerChannelCodebookUInt8Codec(num_bits=codec_bits)
+            if kind in ("non_uniform_loyd_codebook_uint8", "non_uniform_loyd_uint8", "codeword_non_uniform_loyd", "non_uniform_loyd"):
+                return NonUniformLoydCodebookUInt8Codec(num_bits=codec_bits)
+            if kind in ("non_uniform_loyd_per_channel_codebook_uint8", "non_uniform_loyd_per_channel_uint8", "codeword_non_uniform_loyd_per_channel", "non_uniform_loyd_per_channel", "loyd_per_channel"):
+                return NonUniformLoydPerChannelCodebookUInt8Codec(num_bits=codec_bits)
+            if kind in ("mulaw_codebook_uint8", "mulaw_non_uniform_uint8", "codeword_non_uniform", "codeword_mulaw", "non_uniform_mlaw"):
+                return MuLawCodebookUInt8Codec(num_bits=codec_bits)
+            if kind in ("mulaw_per_channel_codebook_uint8", "mulaw_per_channel_uint8", "codeword_mulaw_per_channel", "non_uniform_mlaw_per_channel", "mu_law_per_channel", "mlaw_per_channel"):
+                return MuLawPerChannelCodebookUInt8Codec(num_bits=codec_bits)
+            if kind in ("lloyd_max_codebook_uint8", "lloyd_max_uint8", "codeword_lloyd_max", "non_uniform_lloyd_uint8", "lloyd_max"):
+                return LloydMaxCodebookUInt8Codec(num_bits=codec_bits)
+            if kind in ("trunc_noscale_int8", "trunc_bits_int8", "trunc_scale_int8", "truncation_int8"):
+                return TruncationInt8Codec(num_bits=codec_bits)
+            raise ValueError(f"Unsupported quantization kind: {kind!r}")
 
 
         try:
             if self._quantize_forward:
-                self._fwd_codec = _build_codec(self._forward_quantization, scale_key_prefix="forward")
+                self._fwd_codec_by_bits[8] = _build_codec(self._forward_quantization, scale_key_prefix="forward", bits_override=8)
+                self._fwd_codec_by_bits[4] = _build_codec(self._forward_quantization, scale_key_prefix="forward", bits_override=4)
+                self._fwd_codec = self._fwd_codec_by_bits.get(self._active_forward_bits)
                 if self._fwd_codec is None:
-                    self._quantize_forward = False
+                    raise ValueError("Forward quantization was requested but no forward codec was created.")
             if self._quantize_backward:
-                self._bwd_codec = _build_codec(self._backward_quantization, scale_key_prefix="backward")
+                self._bwd_codec_by_bits[8] = _build_codec(self._backward_quantization, scale_key_prefix="backward", bits_override=8)
+                self._bwd_codec_by_bits[4] = _build_codec(self._backward_quantization, scale_key_prefix="backward", bits_override=4)
+                self._bwd_codec = self._bwd_codec_by_bits.get(self._active_backward_bits)
                 if self._bwd_codec is None:
-                    self._quantize_backward = False
-        except Exception:
-            # If codec setup fails for any reason, fall back to no-op.
-            self._quantize_forward = False
-            self._quantize_backward = False
-            self._fwd_codec = None
-            self._bwd_codec = None
+                    raise ValueError("Backward quantization was requested but no backward codec was created.")
+        except Exception as exc:
+            raise RuntimeError(
+                "Failed to initialize requested quantization codecs. "
+                f"forward_enabled={self._quantize_forward}, forward_kind={self._forward_quantization!r}, "
+                f"backward_enabled={self._quantize_backward}, backward_kind={self._backward_quantization!r}, "
+                f"quantization_bits={quantization_bits}"
+            ) from exc
+
+        logging.info(
+            "Quantization initialized: forward_enabled=%s forward_codec=%s backward_enabled=%s backward_codec=%s bits=%s dynamic=%s dynamic_mode=%s baseline_low_scale=%s baseline_high_scale=%s forward_low_scale=%s forward_high_scale=%s backward_low_scale=%s backward_high_scale=%s moving_baseline_ema=%s test3_low_scale=%s test3_high_scale=%s warmup_epochs=%s",
+            self._quantize_forward,
+            (type(self._fwd_codec).__name__ if self._fwd_codec is not None else None),
+            self._quantize_backward,
+            (type(self._bwd_codec).__name__ if self._bwd_codec is not None else None),
+            quantization_bits,
+            self._dynamic_quantization,
+            self._dynamic_quantization_mode,
+            self._dynamic_quantization_baseline_low_scale,
+            self._dynamic_quantization_baseline_high_scale,
+            self._dynamic_quantization_forward_low_scale,
+            self._dynamic_quantization_forward_high_scale,
+            self._dynamic_quantization_backward_low_scale,
+            self._dynamic_quantization_backward_high_scale,
+            self._dynamic_quantization_baseline_ema,
+            self._dynamic_quantization_test3_low_scale,
+            self._dynamic_quantization_test3_high_scale,
+            self._dynamic_quantization_warmup_epochs,
+        )
 
         self.com_manager = MpiCommunicationManager(comm, rank, size, node_type=node_type)
         self.com_manager.add_observer(self)
+
+    def _build_tensor_distribution_samples(self, total_epochs: int) -> Dict[int, str]:
+        if total_epochs <= 0:
+            return {}
+
+        merged = defaultdict(list)
+        for epoch_idx, label in (
+            (0, "early"),
+            (max(0, total_epochs // 2), "middle"),
+            (max(0, total_epochs - 1), "late"),
+        ):
+            merged[int(epoch_idx)].append(label)
+        return {epoch_idx: "/".join(labels) for epoch_idx, labels in merged.items()}
+
+    def annotate_tensor_distribution_message(self, message, trainer, *, phase=None, epoch=None):
+        if phase is None:
+            phase = getattr(trainer, "phase", None)
+        if epoch is None:
+            epoch = getattr(trainer, "epoch_count", None)
+        if epoch is None:
+            epoch = getattr(trainer, "epoch", None)
+        if phase is not None:
+            message.add_params("_tensor_dist_phase", str(phase))
+        if epoch is not None:
+            try:
+                message.add_params("_tensor_dist_epoch", int(epoch))
+            except Exception:
+                pass
+        if not self._tensor_distribution_logging:
+            return
+
+    def _dynamic_reference_tensor(self, tensor_obj):
+        if isinstance(tensor_obj, tuple) and tensor_obj:
+            return tensor_obj[0]
+        if isinstance(tensor_obj, list) and tensor_obj:
+            return tensor_obj[0]
+        return tensor_obj
+
+    def _is_dynamic_decision_server(self) -> bool:
+        try:
+            server_rank = int(self.args["server_rank"])
+        except Exception:
+            server_rank = 0
+        return self.node_type == "server" and int(self.rank) == server_rank
+
+    def _dynamic_is_warmup_epoch(self, epoch: int) -> bool:
+        return int(epoch) < int(self._dynamic_quantization_warmup_epochs)
+
+    def _observe_dynamic_epoch_tensor(self, params: dict, tensor_key: str) -> None:
+        if not self._dynamic_quantization or not self._is_dynamic_decision_server():
+            return
+        phase = str(params.get("_tensor_dist_phase", "")).strip().lower()
+        if phase != "train":
+            return
+        try:
+            epoch = int(params.get("_tensor_dist_epoch"))
+        except Exception:
+            return
+        reference_tensor = self._dynamic_reference_tensor(params.get(tensor_key))
+        if not isinstance(reference_tensor, torch.Tensor):
+            return
+        stat_key = "forward" if tensor_key == "activations" else "backward"
+        score = self._compute_dynamic_score(stat_key, reference_tensor, epoch=epoch)
+        if score is None:
+            return
+        self._dynamic_epoch_ratio_sum[stat_key] += score
+        self._dynamic_epoch_ratio_count[stat_key] += 1
+        self._dynamic_epoch_last_seen[stat_key] = epoch
+
+    def _dynamic_baseline_mean(self, direction: str) -> Optional[float]:
+        cached_baseline = self._dynamic_baseline_value.get(direction)
+        if cached_baseline is not None:
+            return float(cached_baseline)
+        baseline_count = int(self._dynamic_baseline_ratio_count.get(direction, 0))
+        if baseline_count <= 0:
+            return None
+        baseline_value = float(self._dynamic_baseline_ratio_sum.get(direction, 0.0)) / float(baseline_count)
+        self._dynamic_baseline_value[direction] = baseline_value
+        return baseline_value
+
+    def _dynamic_uses_moving_baseline(self) -> bool:
+        return self._dynamic_quantization_mode in {"test-1", "test-4", "test-5"}
+
+    def _dynamic_uses_composite_score(self) -> bool:
+        return self._dynamic_quantization_mode in {"test-2", "test-5"}
+
+    def _dynamic_uses_hysteresis_test(self) -> bool:
+        return self._dynamic_quantization_mode in {"test-3", "test-4", "test-5"}
+
+    def _dynamic_direction_scales(self, direction: str) -> Tuple[float, float]:
+        if self._dynamic_uses_hysteresis_test():
+            return (
+                self._dynamic_quantization_test3_low_scale,
+                self._dynamic_quantization_test3_high_scale,
+            )
+        if self._dynamic_quantization_mode != "seperate":
+            return (
+                self._dynamic_quantization_baseline_low_scale,
+                self._dynamic_quantization_baseline_high_scale,
+            )
+        if direction == "forward":
+            return (
+                self._dynamic_quantization_forward_low_scale,
+                self._dynamic_quantization_forward_high_scale,
+            )
+        return (
+            self._dynamic_quantization_backward_low_scale,
+            self._dynamic_quantization_backward_high_scale,
+        )
+
+    def _record_dynamic_warmup_score(self, direction: str, avg_score: float) -> float:
+        self._dynamic_baseline_ratio_sum[direction] += avg_score
+        self._dynamic_baseline_ratio_count[direction] += 1
+        baseline_value = float(self._dynamic_baseline_ratio_sum[direction]) / float(self._dynamic_baseline_ratio_count[direction])
+        self._dynamic_baseline_value[direction] = baseline_value
+        return baseline_value
+
+    def _update_dynamic_moving_baseline(self, direction: str, avg_score: Optional[float]) -> Optional[float]:
+        if avg_score is None or not self._dynamic_uses_moving_baseline():
+            return self._dynamic_baseline_mean(direction)
+        baseline_value = self._dynamic_baseline_mean(direction)
+        if baseline_value is None:
+            self._dynamic_baseline_value[direction] = float(avg_score)
+            return float(avg_score)
+        updated_baseline = ((1.0 - self._dynamic_quantization_baseline_ema) * baseline_value) + (
+            self._dynamic_quantization_baseline_ema * float(avg_score)
+        )
+        self._dynamic_baseline_value[direction] = float(updated_baseline)
+        return float(updated_baseline)
+
+    def _get_dynamic_epoch_score(self, direction: str) -> Tuple[Optional[float], Optional[float]]:
+        score_sum = float(self._dynamic_epoch_ratio_sum.get(direction, 0.0))
+        score_count = int(self._dynamic_epoch_ratio_count.get(direction, 0))
+        if score_count <= 0:
+            return None, self._dynamic_baseline_mean(direction)
+        avg_score = score_sum / float(score_count)
+        return avg_score, self._dynamic_baseline_mean(direction)
+
+    def _dynamic_channel_scale_score(self, summary: Dict[str, Any]) -> float:
+        return float(math.log1p(float(summary.get("max_channel_scale_over_min_channel_scale", 0.0) or 0.0)))
+
+    def _compute_dynamic_composite_score(self, summary: Dict[str, Any]) -> float:
+        return float(
+            float(summary.get("outlier_score", 0.0) or 0.0)
+            + float(summary.get("spread_score", 0.0) or 0.0)
+            + self._dynamic_channel_scale_score(summary)
+        )
+
+    def _compute_dynamic_score(self, direction: str, tensor: torch.Tensor, *, epoch: Optional[int] = None) -> Optional[float]:
+        if self._dynamic_uses_composite_score():
+            summary = self._summarize_tensor_distribution(tensor)
+            if not isinstance(summary, dict):
+                return None
+            return self._compute_dynamic_composite_score(summary)
+        return self._compute_dynamic_tail_ratio(tensor)
+
+    def _decide_dynamic_bits(self, *, direction: str, current_bits: int, next_epoch: int) -> Tuple[int, Optional[float], Optional[float]]:
+        avg_score, baseline_mean = self._get_dynamic_epoch_score(direction)
+        if avg_score is None:
+            return current_bits, None, baseline_mean
+        if next_epoch <= self._dynamic_quantization_warmup_epochs:
+            baseline_mean = self._record_dynamic_warmup_score(direction, avg_score)
+            return 8, avg_score, baseline_mean
+        if baseline_mean is None:
+            return current_bits, avg_score, None
+        low_scale, high_scale = self._dynamic_direction_scales(direction)
+        if avg_score < (low_scale * baseline_mean):
+            next_bits = 4
+        elif avg_score > (high_scale * baseline_mean):
+            next_bits = 8
+        else:
+            next_bits = current_bits
+        self._update_dynamic_moving_baseline(direction, avg_score)
+        return next_bits, avg_score, baseline_mean
+
+    def _decide_dynamic_shared_bits(
+        self,
+        *,
+        next_epoch: int,
+        current_forward_bits: int,
+        current_backward_bits: int,
+    ) -> Tuple[int, Optional[float], Optional[float], Optional[float], Optional[float]]:
+        avg_forward_score, forward_baseline = self._get_dynamic_epoch_score("forward")
+        avg_backward_score, backward_baseline = self._get_dynamic_epoch_score("backward")
+
+        available_ratios = [
+            score for score in (avg_forward_score, avg_backward_score) if score is not None
+        ]
+        available_baselines = [
+            baseline for baseline in (forward_baseline, backward_baseline) if baseline is not None
+        ]
+
+        if not available_ratios:
+            shared_current_bits = current_forward_bits if current_forward_bits == current_backward_bits else 8
+            shared_baseline = (
+                sum(available_baselines) / float(len(available_baselines))
+                if available_baselines
+                else None
+            )
+            return shared_current_bits, None, shared_baseline, avg_forward_score, avg_backward_score
+
+        shared_ratio = sum(available_ratios) / float(len(available_ratios))
+        shared_baseline = (
+            sum(available_baselines) / float(len(available_baselines))
+            if available_baselines
+            else None
+        )
+
+        if next_epoch <= self._dynamic_quantization_warmup_epochs:
+            if avg_forward_score is not None:
+                forward_baseline = self._record_dynamic_warmup_score("forward", avg_forward_score)
+            if avg_backward_score is not None:
+                backward_baseline = self._record_dynamic_warmup_score("backward", avg_backward_score)
+            shared_baseline = (
+                sum(
+                    baseline
+                    for baseline in (forward_baseline, backward_baseline)
+                    if baseline is not None
+                )
+                / float(
+                    len([baseline for baseline in (forward_baseline, backward_baseline) if baseline is not None])
+                )
+            ) if any(baseline is not None for baseline in (forward_baseline, backward_baseline)) else None
+            return 8, shared_ratio, shared_baseline, avg_forward_score, avg_backward_score
+        if shared_baseline is None:
+            shared_current_bits = current_forward_bits if current_forward_bits == current_backward_bits else 8
+            return shared_current_bits, shared_ratio, None, avg_forward_score, avg_backward_score
+        low_scale, high_scale = self._dynamic_direction_scales("forward")
+        if shared_ratio < (low_scale * shared_baseline):
+            shared_bits = 4
+        elif shared_ratio > (high_scale * shared_baseline):
+            shared_bits = 8
+        else:
+            shared_bits = current_forward_bits if current_forward_bits == current_backward_bits else 8
+        if avg_forward_score is not None:
+            self._update_dynamic_moving_baseline("forward", avg_forward_score)
+        if avg_backward_score is not None:
+            self._update_dynamic_moving_baseline("backward", avg_backward_score)
+        return shared_bits, shared_ratio, shared_baseline, avg_forward_score, avg_backward_score
+
+    def advance_dynamic_quantization_epoch(self, *, next_epoch: int) -> None:
+        if not self._dynamic_quantization or not self._is_dynamic_decision_server():
+            return
+        if self._dynamic_quantization_mode == "seperate":
+            next_forward_bits, avg_forward_score, forward_baseline = self._decide_dynamic_bits(
+                direction="forward",
+                current_bits=self._active_forward_bits,
+                next_epoch=next_epoch,
+            )
+            next_backward_bits, avg_backward_score, backward_baseline = self._decide_dynamic_bits(
+                direction="backward",
+                current_bits=self._active_backward_bits,
+                next_epoch=next_epoch,
+            )
+            logging.info(
+                "Dynamic quantization epoch decision rank=%s next_epoch=%s mode=%s forward_score=%s forward_baseline=%s backward_score=%s backward_baseline=%s old_forward_bits=%s new_forward_bits=%s old_backward_bits=%s new_backward_bits=%s forward_low_scale=%s forward_high_scale=%s backward_low_scale=%s backward_high_scale=%s",
+                self.rank,
+                next_epoch,
+                self._dynamic_quantization_mode,
+                ("n/a" if avg_forward_score is None else format(avg_forward_score, ".6g")),
+                ("n/a" if forward_baseline is None else format(forward_baseline, ".6g")),
+                ("n/a" if avg_backward_score is None else format(avg_backward_score, ".6g")),
+                ("n/a" if backward_baseline is None else format(backward_baseline, ".6g")),
+                self._active_forward_bits,
+                next_forward_bits,
+                self._active_backward_bits,
+                next_backward_bits,
+                self._dynamic_quantization_forward_low_scale,
+                self._dynamic_quantization_forward_high_scale,
+                self._dynamic_quantization_backward_low_scale,
+                self._dynamic_quantization_backward_high_scale,
+            )
+        else:
+            shared_bits, shared_score, shared_baseline, avg_forward_score, avg_backward_score = self._decide_dynamic_shared_bits(
+                next_epoch=next_epoch,
+                current_forward_bits=self._active_forward_bits,
+                current_backward_bits=self._active_backward_bits,
+            )
+            next_forward_bits = shared_bits
+            next_backward_bits = shared_bits
+            forward_baseline = self._dynamic_baseline_mean("forward")
+            backward_baseline = self._dynamic_baseline_mean("backward")
+            logging.info(
+                "Dynamic quantization epoch decision rank=%s next_epoch=%s mode=%s shared_score=%s shared_baseline=%s forward_score=%s forward_baseline=%s backward_score=%s backward_baseline=%s old_forward_bits=%s new_forward_bits=%s old_backward_bits=%s new_backward_bits=%s low_scale=%s high_scale=%s",
+                self.rank,
+                next_epoch,
+                self._dynamic_quantization_mode,
+                ("n/a" if shared_score is None else format(shared_score, ".6g")),
+                ("n/a" if shared_baseline is None else format(shared_baseline, ".6g")),
+                ("n/a" if avg_forward_score is None else format(avg_forward_score, ".6g")),
+                ("n/a" if forward_baseline is None else format(forward_baseline, ".6g")),
+                ("n/a" if avg_backward_score is None else format(avg_backward_score, ".6g")),
+                ("n/a" if backward_baseline is None else format(backward_baseline, ".6g")),
+                self._active_forward_bits,
+                next_forward_bits,
+                self._active_backward_bits,
+                next_backward_bits,
+                self._dynamic_quantization_baseline_low_scale,
+                self._dynamic_quantization_baseline_high_scale,
+            )
+        self._active_forward_bits = next_forward_bits
+        self._active_backward_bits = next_backward_bits
+        self._fwd_codec = self._fwd_codec_by_bits.get(self._active_forward_bits)
+        self._bwd_codec = self._bwd_codec_by_bits.get(self._active_backward_bits)
+        self._dynamic_epoch_ratio_sum = defaultdict(float)
+        self._dynamic_epoch_ratio_count = defaultdict(int)
+        self._dynamic_epoch_last_seen = {}
+
+    def advance_dynamic_quantization_for_trainer(self, trainer) -> None:
+        if trainer is None:
+            return
+        try:
+            next_epoch = int(getattr(trainer, "epoch"))
+        except Exception:
+            return
+        self.advance_dynamic_quantization_epoch(next_epoch=next_epoch)
+
+    def _attach_dynamic_quantization_control(self, message) -> None:
+        if not self._dynamic_quantization or not self._is_dynamic_decision_server():
+            return
+        try:
+            params = message.get_params() if hasattr(message, "get_params") else None
+        except Exception:
+            params = None
+        if not isinstance(params, dict):
+            return
+        message.add_params(self._dynamic_forward_bits_key, int(self._active_forward_bits))
+        message.add_params(self._dynamic_backward_bits_key, int(self._active_backward_bits))
+
+    def _apply_dynamic_quantization_control(self, msg_params) -> None:
+        if not self._dynamic_quantization:
+            return
+        try:
+            params = msg_params.get_params() if hasattr(msg_params, "get_params") else None
+        except Exception:
+            params = None
+        if not isinstance(params, dict):
+            return
+        forward_bits = params.get(self._dynamic_forward_bits_key)
+        backward_bits = params.get(self._dynamic_backward_bits_key)
+        try:
+            if int(forward_bits) in (4, 8):
+                self._active_forward_bits = int(forward_bits)
+                self._fwd_codec = self._fwd_codec_by_bits.get(self._active_forward_bits)
+        except Exception:
+            pass
+        try:
+            if int(backward_bits) in (4, 8):
+                self._active_backward_bits = int(backward_bits)
+                self._bwd_codec = self._bwd_codec_by_bits.get(self._active_backward_bits)
+        except Exception:
+            pass
+
+    def _collect_logged_tensors(self, obj, prefix: str):
+        items = []
+        if isinstance(obj, torch.Tensor):
+            return [(prefix, obj)]
+        if isinstance(obj, tuple):
+            if prefix == "activations" and len(obj) == 2:
+                return self._collect_logged_tensors(obj[0], f"{prefix}[0]")
+            for idx, value in enumerate(obj):
+                items.extend(self._collect_logged_tensors(value, f"{prefix}[{idx}]"))
+            return items
+        if isinstance(obj, list):
+            if prefix == "activations" and len(obj) == 2:
+                return self._collect_logged_tensors(obj[0], f"{prefix}[0]")
+            for idx, value in enumerate(obj):
+                items.extend(self._collect_logged_tensors(value, f"{prefix}[{idx}]"))
+            return items
+        if isinstance(obj, dict):
+            if self._is_quant_payload(obj):
+                return []
+            for key, value in obj.items():
+                items.extend(self._collect_logged_tensors(value, f"{prefix}.{key}"))
+        return items
+
+    def _estimate_nbytes(self, obj) -> int:
+        if obj is None:
+            return 0
+        if isinstance(obj, torch.Tensor):
+            try:
+                return int(obj.nelement() * obj.element_size())
+            except Exception:
+                try:
+                    return int(obj.numel() * obj.element_size())
+                except Exception:
+                    return 0
+        if isinstance(obj, (bytes, bytearray, memoryview)):
+            return len(obj)
+        if isinstance(obj, str):
+            return len(obj.encode("utf-8", errors="replace"))
+        if isinstance(obj, (int, float, bool)):
+            return sys.getsizeof(obj)
+        if isinstance(obj, dict):
+            return sum(self._estimate_nbytes(key) + self._estimate_nbytes(value) for key, value in obj.items())
+        if isinstance(obj, (list, tuple, set)):
+            return sum(self._estimate_nbytes(value) for value in obj)
+        try:
+            return sys.getsizeof(obj)
+        except Exception:
+            return sys.getsizeof(str(obj))
+
+    def _summarize_tensor_payload_bytes(self, obj, *, preserve_second_if_pair: bool):
+        raw_bytes = 0
+        quantized_bytes = 0
+        metadata_bytes = 0
+
+        if obj is None:
+            return raw_bytes, quantized_bytes, metadata_bytes
+        if isinstance(obj, torch.Tensor):
+            raw_bytes = self._estimate_nbytes(obj)
+            return raw_bytes, raw_bytes, 0
+        if isinstance(obj, tuple):
+            values = (obj[0],) if preserve_second_if_pair and len(obj) == 2 else obj
+            for value in values:
+                child_raw, child_quantized, child_metadata = self._summarize_tensor_payload_bytes(
+                    value,
+                    preserve_second_if_pair=False,
+                )
+                raw_bytes += child_raw
+                quantized_bytes += child_quantized
+                metadata_bytes += child_metadata
+            return raw_bytes, quantized_bytes, metadata_bytes
+        if isinstance(obj, list):
+            values = [obj[0]] if preserve_second_if_pair and len(obj) == 2 else obj
+            for value in values:
+                child_raw, child_quantized, child_metadata = self._summarize_tensor_payload_bytes(
+                    value,
+                    preserve_second_if_pair=False,
+                )
+                raw_bytes += child_raw
+                quantized_bytes += child_quantized
+                metadata_bytes += child_metadata
+            return raw_bytes, quantized_bytes, metadata_bytes
+        if isinstance(obj, dict):
+            if self._is_quant_payload(obj):
+                quantized_bytes = self._estimate_nbytes(obj.get("q"))
+                metadata_bytes = sum(
+                    self._estimate_nbytes(key) + self._estimate_nbytes(value)
+                    for key, value in obj.items()
+                    if key != "q"
+                )
+                return 0, quantized_bytes, metadata_bytes
+            for value in obj.values():
+                child_raw, child_quantized, child_metadata = self._summarize_tensor_payload_bytes(
+                    value,
+                    preserve_second_if_pair=False,
+                )
+                raw_bytes += child_raw
+                quantized_bytes += child_quantized
+                metadata_bytes += child_metadata
+            return raw_bytes, quantized_bytes, metadata_bytes
+        return 0, 0, 0
+
+    def _record_epoch_comm_stats(self, tensor_key: str, *, raw_bytes: int, quantized_bytes: int, metadata_bytes: int, quant_time: float):
+        prefix = "acts" if tensor_key == "activations" else "grads"
+        self._epoch_comm_stats[f"{prefix}_raw_bytes"] += int(raw_bytes)
+        self._epoch_comm_stats[f"{prefix}_quantized_bytes"] += int(quantized_bytes)
+        self._epoch_comm_stats[f"{prefix}_metadata_bytes"] += int(metadata_bytes)
+        self._epoch_comm_stats[f"{prefix}_quant_time"] += float(quant_time)
+
+    @staticmethod
+    def _safe_ratio(numerator: float, denominator: float) -> float:
+        if denominator <= 0:
+            return 1.0 if numerator <= 0 else 0.0
+        return float(numerator) / float(denominator)
+
+    def _consume_comm_analysis(self, params: dict, tensor_key: str) -> bool:
+        analysis = params.get(self._comm_analysis_key)
+        if not isinstance(analysis, dict):
+            return False
+        stats = analysis.get(tensor_key)
+        if not isinstance(stats, dict):
+            return False
+        self._record_epoch_comm_stats(
+            tensor_key,
+            raw_bytes=int(stats.get("raw_bytes", 0) or 0),
+            quantized_bytes=int(stats.get("quantized_bytes", 0) or 0),
+            metadata_bytes=int(stats.get("metadata_bytes", 0) or 0),
+            quant_time=float(stats.get("quant_time", 0.0) or 0.0),
+        )
+        return True
+
+    def get_epoch_comm_summary(self):
+        acts_raw_bytes = int(self._epoch_comm_stats.get("acts_raw_bytes", 0))
+        acts_quantized_bytes = int(self._epoch_comm_stats.get("acts_quantized_bytes", 0))
+        acts_metadata_bytes = int(self._epoch_comm_stats.get("acts_metadata_bytes", 0))
+        grads_raw_bytes = int(self._epoch_comm_stats.get("grads_raw_bytes", 0))
+        grads_quantized_bytes = int(self._epoch_comm_stats.get("grads_quantized_bytes", 0))
+        grads_metadata_bytes = int(self._epoch_comm_stats.get("grads_metadata_bytes", 0))
+        acts_total_encoded = acts_quantized_bytes + acts_metadata_bytes
+        grads_total_encoded = grads_quantized_bytes + grads_metadata_bytes
+        total_raw_bytes = acts_raw_bytes + grads_raw_bytes
+        total_encoded_bytes = acts_total_encoded + grads_total_encoded
+        return {
+            "raw_acts_bytes": acts_raw_bytes,
+            "quantized_acts_bytes": acts_quantized_bytes,
+            "acts_metadata_bytes": acts_metadata_bytes,
+            "raw_grads_bytes": grads_raw_bytes,
+            "quantized_grads_bytes": grads_quantized_bytes,
+            "grads_metadata_bytes": grads_metadata_bytes,
+            "acts_compression": self._safe_ratio(acts_raw_bytes, acts_total_encoded),
+            "grads_compression": self._safe_ratio(grads_raw_bytes, grads_total_encoded),
+            "total_compression": self._safe_ratio(total_raw_bytes, total_encoded_bytes),
+            "acts_quant_time": float(self._epoch_comm_stats.get("acts_quant_time", 0.0)),
+            "grads_quant_time": float(self._epoch_comm_stats.get("grads_quant_time", 0.0)),
+            "send_time": float(getattr(self.com_manager, "tmp_send_time", 0.0)),
+            "recv_time": float(getattr(self.com_manager, "tmp_receive_time", 0.0)),
+        }
+
+    def log_epoch_summary(self, *, epoch: int, train_acc: float, train_loss: float, val_acc: float, val_loss: float, epoch_time: float):
+        if self._comm_log is not None:
+            summary = self.get_epoch_comm_summary()
+            self._comm_log.info(
+                "epoch_summary rank={} node_type={} epoch={} train_acc={} train_loss={} val_acc={} val_loss={} raw_acts_bytes={} quantized_acts_bytes={} acts_metadata_bytes={} raw_grads_bytes={} quantized_grads_bytes={} grads_metadata_bytes={} acts_compression={} grads_compression={} total_compression={} acts_quant_time={} grads_quant_time={} send_time={} recv_time={} epoch_time={}".format(
+                    self.rank,
+                    self.node_type,
+                    int(epoch),
+                    format(float(train_acc), ".6g"),
+                    format(float(train_loss), ".6g"),
+                    format(float(val_acc), ".6g"),
+                    format(float(val_loss), ".6g"),
+                    summary["raw_acts_bytes"],
+                    summary["quantized_acts_bytes"],
+                    summary["acts_metadata_bytes"],
+                    summary["raw_grads_bytes"],
+                    summary["quantized_grads_bytes"],
+                    summary["grads_metadata_bytes"],
+                    format(summary["acts_compression"], ".6g"),
+                    format(summary["grads_compression"], ".6g"),
+                    format(summary["total_compression"], ".6g"),
+                    format(summary["acts_quant_time"], ".6g"),
+                    format(summary["grads_quant_time"], ".6g"),
+                    format(summary["send_time"], ".6g"),
+                    format(summary["recv_time"], ".6g"),
+                    format(float(epoch_time), ".6g"),
+                )
+            )
+        self._epoch_comm_stats = defaultdict(float)
+        self.com_manager.reset_analysis_data()
+
+    def _bucketize_distribution_metric(self, value: float, low_cutoff: float, high_cutoff: float) -> str:
+        if value < low_cutoff:
+            return "low"
+        if value < high_cutoff:
+            return "medium"
+        return "high"
+
+    def _compute_dynamic_tail_ratio(self, tensor: torch.Tensor) -> Optional[float]:
+        try:
+            with torch.no_grad():
+                flat = tensor.detach()
+                if not flat.dtype.is_floating_point:
+                    flat = flat.float()
+                flat = flat.reshape(-1).to(dtype=torch.float32)
+                if flat.numel() == 0:
+                    return None
+                flat_abs = flat.abs()
+                p95_abs = float(torch.quantile(flat_abs, 0.95).item())
+                p99_abs = float(torch.quantile(flat_abs, 0.99).item())
+                return p99_abs / (p95_abs + 1e-12)
+        except Exception:
+            return None
+
+    def _summarize_tensor_distribution(self, tensor: torch.Tensor):
+        try:
+            with torch.no_grad():
+                flat = tensor.detach()
+                if not flat.dtype.is_floating_point:
+                    flat = flat.float()
+                flat = flat.reshape(-1).to(device="cpu", dtype=torch.float32)
+                if flat.numel() == 0:
+                    return None
+                flat_abs = flat.abs()
+                mean = float(flat.mean().item())
+                std = float(flat.std(unbiased=False).item())
+                min_value = float(flat.min().item())
+                max_value = float(flat.max().item())
+                mean_abs = float(flat_abs.mean().item())
+                max_abs = float(flat_abs.max().item())
+                q90 = float(torch.quantile(flat_abs, 0.90).item())
+                p95_abs = float(torch.quantile(flat_abs, 0.95).item())
+                p99_abs = float(torch.quantile(flat_abs, 0.99).item())
+                spread_score = std / (mean_abs + 1e-12)
+                outlier_score = p99_abs / (q90 + 1e-12)
+                near_zero_threshold = max(1e-8, 0.1 * (mean_abs + 1e-12))
+                near_zero_fraction = float((flat_abs <= near_zero_threshold).float().mean().item())
+
+                centered = flat - mean
+                centered2 = centered * centered
+                centered3 = centered2 * centered
+                centered4 = centered2 * centered2
+                skewness = float(centered3.mean().item() / ((std ** 3) + 1e-12))
+                kurtosis = float(centered4.mean().item() / ((std ** 4) + 1e-12))
+
+                channel_tensor = tensor.detach()
+                if not channel_tensor.dtype.is_floating_point:
+                    channel_tensor = channel_tensor.float()
+                channel_tensor = channel_tensor.to(device="cpu", dtype=torch.float32)
+                if channel_tensor.ndim == 0:
+                    channel_flat = channel_tensor.reshape(1, 1)
+                else:
+                    channel_axis = 0 if channel_tensor.ndim < 2 else 1
+                    perm = (channel_axis, *[idx for idx in range(channel_tensor.ndim) if idx != channel_axis])
+                    channel_flat = channel_tensor.permute(perm).contiguous().reshape(channel_tensor.shape[channel_axis], -1)
+                channel_std = channel_flat.std(dim=1, unbiased=False)
+                channel_scale = channel_flat.abs().max(dim=1).values
+                mean_channel_std = float(channel_std.mean().item())
+                std_channel_std = float(channel_std.std(unbiased=False).item())
+                min_channel_scale = float(channel_scale.min().item()) if channel_scale.numel() > 0 else 0.0
+                max_channel_scale = float(channel_scale.max().item()) if channel_scale.numel() > 0 else 0.0
+                max_channel_scale_over_min_channel_scale = max_channel_scale / (min_channel_scale + 1e-12)
+                return {
+                    "shape": tuple(tensor.shape),
+                    "mean": mean,
+                    "std": std,
+                    "min": min_value,
+                    "max": max_value,
+                    "mean_abs": mean_abs,
+                    "max_abs": max_abs,
+                    "p95_abs": p95_abs,
+                    "p99_abs": p99_abs,
+                    "skewness": skewness,
+                    "kurtosis": kurtosis,
+                    "mean_channel_std": mean_channel_std,
+                    "std_channel_std": std_channel_std,
+                    "max_channel_scale_over_min_channel_scale": max_channel_scale_over_min_channel_scale,
+                    "spread_score": spread_score,
+                    "spread_bucket": self._bucketize_distribution_metric(spread_score, 0.5, 1.25),
+                    "outlier_score": outlier_score,
+                    "outlier_bucket": self._bucketize_distribution_metric(outlier_score, 1.5, 3.0),
+                    "near_zero_fraction": near_zero_fraction,
+                    "near_zero_bucket": self._bucketize_distribution_metric(near_zero_fraction, 0.2, 0.6),
+                }
+        except Exception:
+            return None
+
+    def _maybe_log_tensor_distribution(self, message) -> None:
+        if not self._tensor_distribution_logging or self._comm_log is None:
+            return
+        try:
+            params = message.get_params() if hasattr(message, "get_params") else None
+        except Exception:
+            params = None
+        if not isinstance(params, dict):
+            return
+
+        phase = str(params.get("_tensor_dist_phase", "")).strip().lower()
+        if phase != "train" and not self._tensor_distribution_log_validation:
+            return
+        epoch = params.get("_tensor_dist_epoch")
+        try:
+            epoch = int(epoch)
+        except Exception:
+            return
+
+        sample_label = self._tensor_distribution_samples.get(epoch)
+        if not sample_label:
+            return
+
+        for key in ("activations", "activation_grads"):
+            if key not in params:
+                continue
+            for tensor_name, tensor in self._collect_logged_tensors(params[key], key):
+                summary = self._summarize_tensor_distribution(tensor)
+                if summary is None:
+                    continue
+                dedupe_key = (self.rank, self.node_type, phase, epoch, sample_label, tensor_name)
+                if dedupe_key in self._tensor_distribution_logged:
+                    continue
+                self._tensor_distribution_logged.add(dedupe_key)
+                self._comm_log.info(
+                    "tensor_distribution rank={} node_type={} phase={} epoch={} sample={} tensor={} shape={} mean={} std={} min={} max={} mean_abs={} max_abs={} p95_abs={} p99_abs={} skewness={} kurtosis={} mean_channel_std={} std_channel_std={} max_channel_scale_over_min_channel_scale={} spread={} spread_score={} outliers={} outlier_score={} near_zero={} near_zero_fraction={}".format(
+                        self.rank,
+                        self.node_type,
+                        phase,
+                        epoch,
+                        sample_label,
+                        tensor_name,
+                        summary["shape"],
+                        format(summary["mean"], ".6g"),
+                        format(summary["std"], ".6g"),
+                        format(summary["min"], ".6g"),
+                        format(summary["max"], ".6g"),
+                        format(summary["mean_abs"], ".6g"),
+                        format(summary["max_abs"], ".6g"),
+                        format(summary["p95_abs"], ".6g"),
+                        format(summary["p99_abs"], ".6g"),
+                        format(summary["skewness"], ".6g"),
+                        format(summary["kurtosis"], ".6g"),
+                        format(summary["mean_channel_std"], ".6g"),
+                        format(summary["std_channel_std"], ".6g"),
+                        format(summary["max_channel_scale_over_min_channel_scale"], ".6g"),
+                        summary["spread_bucket"],
+                        format(summary["spread_score"], ".6g"),
+                        summary["outlier_bucket"],
+                        format(summary["outlier_score"], ".6g"),
+                        summary["near_zero_bucket"],
+                        format(summary["near_zero_fraction"], ".6g"),
+                    )
+                )
 
     def _is_quant_payload(self, obj) -> bool:
         if not isinstance(obj, dict):
@@ -636,11 +1497,22 @@ class MessageManager(Observer):
         if obj.get("codec") in (
             "fp8_e4m3",
             "dynamic_symmetric_int8",
+            "dynamic_symmetric_int8_per_channel",
+            "uniform_codebook_uint8",
+            "uniform_per_channel_codebook_uint8",
+            "non_uniform_loyd_codebook_uint8",
+            "mulaw_codebook_uint8",
+            "non_uniform_loyd_per_channel_codebook_uint8",
+            "mulaw_per_channel_codebook_uint8",
+            "lloyd_max_codebook_uint8",
+            "trunc_noscale_int8",
             "trunc_bits_int8",
             "trunc_scale_int8",
             "minmax_affine_uint8",
             "uniform_asymmetric_uint8",
         ):
+            return True
+        if "q" in obj and "shape" in obj and ("scale" in obj or "codebook" in obj or "layout" in obj):
             return True
         return "q" in obj and "scale" in obj and "zero_point" in obj
 
@@ -650,11 +1522,13 @@ class MessageManager(Observer):
 
         if isinstance(obj, torch.Tensor):
             # Only quantize floating-point tensors (activations). Labels are typically int64.
-            try:
-                if obj.dtype is not None and obj.dtype.is_floating_point:
+            if obj.dtype is not None and obj.dtype.is_floating_point:
+                try:
                     return codec.encode(obj)
-            except Exception:
-                pass
+                except Exception as exc:
+                    raise RuntimeError(
+                        f"Failed to encode tensor with codec {type(codec).__name__} for dtype={obj.dtype} shape={tuple(obj.shape)}"
+                    ) from exc
             return obj
 
         # Common pattern across algorithms: (acts, labels) stored under the
@@ -688,8 +1562,10 @@ class MessageManager(Observer):
                 except Exception:
                     dev = None
                 return codec.decode(obj, device=(dev if dev is not None else "cpu"), dtype=torch.float32)
-            except Exception:
-                return obj
+            except Exception as exc:
+                raise RuntimeError(
+                    f"Failed to decode payload with codec {type(codec).__name__}"
+                ) from exc
 
         if isinstance(obj, tuple):
             if preserve_second_if_pair and len(obj) == 2:
@@ -703,6 +1579,28 @@ class MessageManager(Observer):
             return {k: self._decode_tensor_obj(v, codec, preserve_second_if_pair=preserve_second_if_pair) for k, v in obj.items()}
         return obj
 
+    def _move_tensor_obj(self, obj, device):
+        if isinstance(obj, torch.Tensor):
+            try:
+                return obj.to(device)
+            except Exception:
+                return obj
+        if isinstance(obj, tuple):
+            return tuple(self._move_tensor_obj(v, device) for v in obj)
+        if isinstance(obj, list):
+            return [self._move_tensor_obj(v, device) for v in obj]
+        if isinstance(obj, dict):
+            if self._is_quant_payload(obj):
+                return obj
+            return {k: self._move_tensor_obj(v, device) for k, v in obj.items()}
+        return obj
+
+    def _current_device(self):
+        try:
+            return self.args["device"]
+        except Exception:
+            return "cpu"
+
     def _maybe_quantize_message(self, message) -> None:
         try:
             params = message.get_params() if hasattr(message, "get_params") else None
@@ -710,26 +1608,86 @@ class MessageManager(Observer):
             params = None
         if not isinstance(params, dict):
             return
+
+        analysis = params.get(self._comm_analysis_key)
+        if not isinstance(analysis, dict):
+            analysis = {}
+            params[self._comm_analysis_key] = analysis
+
         # Forward-path activations
-        if self._quantize_forward and self._fwd_codec is not None and "activations" in params:
-            try:
-                params["activations"] = self._encode_tensor_obj(
-                    params["activations"],
-                    self._fwd_codec,
-                    preserve_second_if_pair=True,
-                )
-            except Exception:
-                pass
+        if "activations" in params:
+            raw_bytes, _, _ = self._summarize_tensor_payload_bytes(params["activations"], preserve_second_if_pair=True)
+            quant_time = 0.0
+            if self._quantize_forward and self._fwd_codec is not None:
+                try:
+                    quant_started = time.perf_counter()
+                    params["activations"] = self._encode_tensor_obj(
+                        params["activations"],
+                        self._fwd_codec,
+                        preserve_second_if_pair=True,
+                    )
+                    quant_time = time.perf_counter() - quant_started
+                except Exception:
+                    quant_time = 0.0
+            _, quantized_bytes, metadata_bytes = self._summarize_tensor_payload_bytes(
+                params["activations"],
+                preserve_second_if_pair=True,
+            )
+            analysis["activations"] = {
+                "raw_bytes": int(raw_bytes),
+                "quantized_bytes": int(quantized_bytes),
+                "metadata_bytes": int(metadata_bytes),
+                "quant_time": float(quant_time),
+            }
+            self._record_epoch_comm_stats(
+                "activations",
+                raw_bytes=raw_bytes,
+                quantized_bytes=quantized_bytes,
+                metadata_bytes=metadata_bytes,
+                quant_time=quant_time,
+            )
         # Backward-path gradients
-        if self._quantize_backward and self._bwd_codec is not None and "activation_grads" in params:
-            try:
-                params["activation_grads"] = self._encode_tensor_obj(
-                    params["activation_grads"],
-                    self._bwd_codec,
-                    preserve_second_if_pair=False,
-                )
-            except Exception:
-                pass
+        if "activation_grads" in params:
+            self._observe_dynamic_epoch_tensor(params, "activation_grads")
+            raw_bytes, _, _ = self._summarize_tensor_payload_bytes(params["activation_grads"], preserve_second_if_pair=False)
+            quant_time = 0.0
+            if self._quantize_backward and self._bwd_codec is not None:
+                try:
+                    quant_started = time.perf_counter()
+                    params["activation_grads"] = self._encode_tensor_obj(
+                        params["activation_grads"],
+                        self._bwd_codec,
+                        preserve_second_if_pair=False,
+                    )
+                    quant_time = time.perf_counter() - quant_started
+                except Exception:
+                    quant_time = 0.0
+            _, quantized_bytes, metadata_bytes = self._summarize_tensor_payload_bytes(
+                params["activation_grads"],
+                preserve_second_if_pair=False,
+            )
+            analysis["activation_grads"] = {
+                "raw_bytes": int(raw_bytes),
+                "quantized_bytes": int(quantized_bytes),
+                "metadata_bytes": int(metadata_bytes),
+                "quant_time": float(quant_time),
+            }
+            self._record_epoch_comm_stats(
+                "activation_grads",
+                raw_bytes=raw_bytes,
+                quantized_bytes=quantized_bytes,
+                metadata_bytes=metadata_bytes,
+                quant_time=quant_time,
+            )
+
+        # MPI comm.send pickles Python objects. Stage any raw tensors on CPU
+        # before enqueueing so CUDA tensors are not sent directly.
+        for key in ("activations", "activation_grads"):
+            if key in params:
+                try:
+                    params[key] = self._move_tensor_obj(params[key], "cpu")
+                except Exception:
+                    pass
 
     def _maybe_dequantize_message(self, msg_params) -> None:
         try:
@@ -738,6 +1696,9 @@ class MessageManager(Observer):
             params = None
         if not isinstance(params, dict):
             return
+        for key in ("activations", "activation_grads"):
+            if key in params:
+                self._consume_comm_analysis(params, key)
         # Forward-path activations
         if self._quantize_forward and self._fwd_codec is not None and "activations" in params:
             try:
@@ -758,6 +1719,16 @@ class MessageManager(Observer):
                 )
             except Exception:
                 pass
+
+        # Restore raw tensors to the receiver's configured device.
+        device = self._current_device()
+        for key in ("activations", "activation_grads"):
+            if key in params:
+                try:
+                    params[key] = self._move_tensor_obj(params[key], device)
+                except Exception:
+                    pass
+        params.pop(self._comm_analysis_key, None)
 
     def _safe_msg_type_and_size(self, message) -> Tuple[Optional[int], int]:
         """Best-effort extraction of (msg_type, size_bytes) without raising."""
@@ -785,8 +1756,17 @@ class MessageManager(Observer):
         except Exception:
             pass
 
+        self._apply_dynamic_quantization_control(msg_params)
+
         # Decode activations after comm accounting, before dispatch to algorithm handlers.
         self._maybe_dequantize_message(msg_params)
+
+        try:
+            params = msg_params.get_params() if hasattr(msg_params, "get_params") else None
+        except Exception:
+            params = None
+        if isinstance(params, dict) and "activations" in params:
+            self._observe_dynamic_epoch_tensor(params, "activations")
 
         handler = self._message_handlers.get(msg_type)
         if handler is None:
@@ -795,6 +1775,9 @@ class MessageManager(Observer):
         handler(msg_params)
 
     def send_message(self, message, priority: Optional[int] = None):
+        self._attach_dynamic_quantization_control(message)
+        self._maybe_log_tensor_distribution(message)
+
         # Quantize activations before accounting and enqueueing for send.
         self._maybe_quantize_message(message)
 
@@ -859,3 +1842,4 @@ class MessageManager(Observer):
         except Exception:
             pass
         self.com_manager.stop_receive_message()
+

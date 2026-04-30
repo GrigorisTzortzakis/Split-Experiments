@@ -1,11 +1,11 @@
-"""Server-side message manager/coordination for `TaskAgnostic2`."""
+﻿"""Server-side message manager/coordination for `TaskAgnostic2`."""
 
 from mpi4py import MPI
 import logging
 import time
 from .message_define import MyMessage
 from runtime.MPI.Messaging_MPI import Message, MessageManager
-from runtime.log import Log
+from runtime.exports.log import Log
 
 
 class ServerManager(MessageManager):
@@ -105,7 +105,7 @@ class ServerManager(MessageManager):
 
             self.trainer.client_act_check_dict[dataset_cur] = 0
 
-    def handle_message_finish_protocol(self):
+    def handle_message_finish_protocol(self, msg_params=None):
         self.finished_nodes += 1
         if self.finished_nodes == self.trainer.MAX_RANK:
             self.finish()
@@ -158,7 +158,7 @@ class ServerManager(MessageManager):
             # self.log.info(head_model_avg)
             # self.log.info(tail_model_avg)
             for idx in range(start, end):
-                # self.log.info("send_model_param_to_fed_client： {}".format(idx))
+                # self.log.info("send_model_param_to_fed_clientï¼š {}".format(idx))
                 self.send_model_param_to_fed_client(idx, head_model_avg, tail_model_avg)
 
     # avg server
@@ -225,3 +225,4 @@ class ServerManager(MessageManager):
             for i in range(start, end):
                 # self.log.info("all client have been trained one epoch".format(i))
                 self.send_ready_get_model(i)
+

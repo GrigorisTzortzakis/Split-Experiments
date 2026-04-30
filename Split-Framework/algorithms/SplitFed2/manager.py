@@ -1,4 +1,4 @@
-"""Managers (client + servers) and message types for `SplitFed2`.
+﻿"""Managers (client + servers) and message types for `SplitFed2`.
 
 Per your requirements:
 - All MPI manager code lives in this single file.
@@ -46,7 +46,7 @@ class MyMessage(object):
 import logging
 
 from runtime.MPI.Messaging_MPI import Message, MessageManager
-from runtime.log import Log
+from runtime.exports.log import Log
 
 
 class MainServerManager(MessageManager):
@@ -69,6 +69,7 @@ class MainServerManager(MessageManager):
             MyMessage.MSG_AGR_KEY_RESULT,
             (self.trainer.total, self.trainer.correct, self.trainer.val_loss),
         )
+        self.annotate_tensor_distribution_message(message, self.trainer)
         self.send_message(message)
 
     def register_message_receive_handlers(self):
@@ -108,6 +109,7 @@ class FedServerManager(MessageManager):
         super().__init__(args, "server", args["comm"], args["rank"], args["worker_number"], backend)
         self.log = Log(self.__class__.__name__, args)
         self.trainer = trainer
+        self.finished_nodes = 0
 
     def run(self):
         super().run()
@@ -119,29 +121,41 @@ class FedServerManager(MessageManager):
         )
 
     def handle_message_finish_protocol(self, msg_params=None):
-        self.finish()
+        self.finished_nodes += 1
+        if self.finished_nodes == self.trainer.MAX_RANK:
+            self.finish()
 
     def handle_message_model_param(self, msg_params):
         sender = msg_params.get(MyMessage.MSG_ARG_KEY_SENDER)
         model_param = msg_params.get(MyMessage.MSG_ARG_KEY_MODEL)
-        sample_number = msg_params.get(MyMessage.MSG_AGR_KEY_SAMPLE_NUM)
-        self.trainer.sum_sample_number += sample_number
-        self.trainer.model_param_dict[sender] = (sample_number, model_param)
+        sample_num = msg_params.get(MyMessage.MSG_AGR_KEY_SAMPLE_NUM)
+        self.trainer.model_param_dict[sender] = model_param
+        self.trainer.sample_num_dict[sender] = sample_num
 
         self.trainer.model_param_num += 1
         if self.trainer.model_param_num == self.trainer.MAX_RANK:
             self.log.info("get all model params ---- from rank {}".format(self.trainer.rank))
             self.trainer.model_param_num = 0
-            model_avg = model_param
+            ordered_client_ids = sorted(self.trainer.model_param_dict.keys())
+            model_avg = self.trainer.model_param_dict[ordered_client_ids[0]]
+            client_weights = {
+                client_id: float(self.trainer.sample_num_dict.get(client_id, 1.0))
+                for client_id in ordered_client_ids
+            }
+            total_weight = sum(client_weights.values())
+            if total_weight <= 0:
+                client_weights = {client_id: 1.0 for client_id in ordered_client_ids}
+                total_weight = float(len(ordered_client_ids))
             for key in model_avg.keys():
-                for idx in range(1, self.trainer.MAX_RANK + 1):
-                    local_sample_number, local_model_params = self.trainer.model_param_dict[idx]
-                    w = local_sample_number / self.trainer.sum_sample_number
-                    if idx == 1:
-                        model_avg[key] = local_model_params[key] * w
+                for index, client_id in enumerate(ordered_client_ids):
+                    local_model_params = self.trainer.model_param_dict[client_id]
+                    weight = client_weights[client_id] / total_weight
+                    if index == 0:
+                        model_avg[key] = local_model_params[key].clone() * weight
                     else:
-                        model_avg[key] += local_model_params[key] * w
-            self.trainer.sum_sample_number = 0
+                        model_avg[key] += local_model_params[key] * weight
+            self.trainer.model_param_dict = dict()
+            self.trainer.sample_num_dict = dict()
             for idx in range(1, self.trainer.MAX_RANK + 1):
                 self.send_model_param_to_client(idx, model_avg)
 
@@ -163,8 +177,8 @@ class FedServer:
         self.MAX_RANK = args["max_rank"]
 
         self.model_param_dict = dict()
+        self.sample_num_dict = dict()
         self.model_param_num = 0
-        self.sum_sample_number = 0
 
 
 # Backwards-compatible export: existing code expects `ServerManager`.
@@ -174,7 +188,7 @@ import logging
 import torch
 import time
 from runtime.MPI.Messaging_MPI import Message, MessageManager
-from runtime.log import Log
+from runtime.exports.log import Log
 from .client import SplitNNClient
 
 
@@ -190,38 +204,31 @@ class ClientManager(MessageManager):
         self.trainer = trainer
         self.trainer.train_mode()
         self.log = Log(self.__class__.__name__, args)
-        self.fed_server_rank = args.get("fed_server_rank", 0)
+        fed_server_rank = args["fed_server_rank"]
+        self.fed_server_rank = 0 if fed_server_rank is None else fed_server_rank
+        self.log_comm_stats = bool(args.get("log_comm_stats", False)) if isinstance(args, dict) else False
 
     def run(self):
-        # logging.info("{} begin run_forward_pass".format(self.trainer.rank))
         self.run_forward_pass()
         super(ClientManager, self).run()
 
     def run_forward_pass(self):
         acts, labels = self.trainer.forward_pass()
-        # logging.info("{} end run_forward_pass act :{}".format(self.trainer.rank, acts.shape))
-        logging.warning("rank {}".format(self.trainer.rank))
         self.send_activations_and_labels_to_server(acts, labels, self.trainer.SERVER_RANK)
         self.trainer.batch_idx += 1
 
     def run_eval(self):
         self.trainer.eval_mode()
-        self.trainer.print_com_size(self.com_manager)
-        for i in range(len(self.trainer.testloader)):
-            logging.warning("validate {}".format(i))
+        if self.log_comm_stats:
+            self.trainer.print_com_size(self.com_manager)
+        for _ in range(len(self.trainer.testloader)):
             self.run_forward_pass()
-            while True:
-                if self.com_manager.q_receiver.qsize() > 0:
-                    msg_params = self.com_manager.q_receiver.get()
-                    self.com_manager.notify(msg_params)
-                    #
-                    break
-                else:
-                    time.sleep(0.1)
+            msg_params = self.com_manager.wait_for_message()
+            self.com_manager.notify(msg_params)
         self.trainer.write_log()
 
         self.trainer.epoch_count += 1
-        if self.trainer.epoch_count == self.trainer.MAX_EPOCH_PER_NODE and self.trainer.rank == self.trainer.MAX_RANK:
+        if self.trainer.epoch_count == self.trainer.MAX_EPOCH_PER_NODE:
             self.send_finish_to_server(self.trainer.SERVER_RANK)
             self.send_finish_to_server(self.fed_server_rank)
             self.finish()
@@ -245,7 +252,6 @@ class ClientManager(MessageManager):
             self.trainer.write_log()
             grads = msg_params.get(MyMessage.MSG_ARG_KEY_GRADS)
             self.trainer.backward_pass(grads)
-            logging.warning("batch: {} len {}".format(self.trainer.batch_idx, len(self.trainer.trainloader)))
 
             # if self.trainer.batch_idx % 10 == 0 and self.trainer.batch_idx != len(self.trainer.trainloader):
             #     self.send_model_param_to_fed_server(0)
@@ -281,10 +287,10 @@ class ClientManager(MessageManager):
                 self.run_forward_pass()
 
     def send_activations_and_labels_to_server(self, acts, labels, receive_id):
-        logging.warning("acts to {}".format(receive_id))
         message = Message(MyMessage.MSG_TYPE_C2S_SEND_ACTS, self.rank, receive_id)
         message.add_params(MyMessage.MSG_ARG_KEY_ACTS, (acts, labels))
         message.add_params(MyMessage.MSG_ARG_KEY_PHASE, self.trainer.phase)
+        self.annotate_tensor_distribution_message(message, self.trainer)
         self.send_message(message)
 
     def send_finish_to_server(self, receive_id):
@@ -302,3 +308,4 @@ class ClientManager(MessageManager):
         message.add_params(MyMessage.MSG_ARG_KEY_MODEL, self.trainer.model.state_dict())
         message.add_params(MyMessage.MSG_AGR_KEY_SAMPLE_NUM, self.trainer.local_sample_number)
         self.send_message(message)
+

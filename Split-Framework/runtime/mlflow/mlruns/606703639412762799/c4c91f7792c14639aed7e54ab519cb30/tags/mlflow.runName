@@ -1,0 +1,1 @@
+3 clients | Non-IID a=0.1 | resnet18 | 8bit | arithmetic_conversion/int8 | forward_backward

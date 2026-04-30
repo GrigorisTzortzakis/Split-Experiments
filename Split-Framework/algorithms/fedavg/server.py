@@ -1,6 +1,6 @@
-"""Server-side model/trainer for the `fedavg` algorithm variant."""
+﻿"""Server-side model/trainer for the `fedavg` algorithm variant."""
 
-from runtime.log import Log
+from runtime.exports.log import Log
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -41,3 +41,4 @@ class SplitNNServer():
     def eval_mode(self):
      #   self.model.eval()
         self.phase = "validation"
+

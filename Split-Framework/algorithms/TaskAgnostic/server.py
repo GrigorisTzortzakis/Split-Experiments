@@ -1,4 +1,4 @@
-"""Server-side model/trainer for the `TaskAgnostic` algorithm variant."""
+﻿"""Server-side model/trainer for the `TaskAgnostic` algorithm variant."""
 
 import torch
 import torch.nn as nn
@@ -7,7 +7,7 @@ import sys
 
 sys.path.extend("../../../")
 
-from runtime.log import Log
+from runtime.exports.log import Log
 
 class SplitNNServer():
     def __init__(self, args):
@@ -66,5 +66,6 @@ class SplitNNServer():
 
             return True
         return False
+
 
 

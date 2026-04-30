@@ -1,4 +1,4 @@
-"""Server-side model/trainer for the `vertical` algorithm variant."""
+﻿"""Server-side model/trainer for the `vertical` algorithm variant."""
 
 import torch
 import torch.nn as nn
@@ -7,7 +7,7 @@ import sys
 
 sys.path.extend("../../../")
 
-from runtime.log import Log
+from runtime.exports.log import Log
 
 
 class SplitNNServer():
@@ -77,3 +77,4 @@ class SplitNNServer():
         # logging.info("add_client_local_result. index = %d" % index)
         self.client_train_logits_list[index] = host_train_logits
         self.flag_client_model_uploaded_dict[index] = True
+

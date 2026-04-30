@@ -1,4 +1,4 @@
-"""Managers (client + server) and message types for `TaskAgnostic`."""
+﻿"""Managers (client + server) and message types for `TaskAgnostic`."""
 
 # --- Message types -------------------------------------------------
 class MyMessage(object):
@@ -55,7 +55,7 @@ from mpi4py import MPI
 import logging
 import time
 from runtime.MPI.Messaging_MPI import Message, MessageManager
-from runtime.log import Log
+from runtime.exports.log import Log
 
 
 class ServerManager(MessageManager):
@@ -155,7 +155,7 @@ class ServerManager(MessageManager):
 
             self.trainer.client_act_check_dict[dataset_cur] = 0
 
-    def handle_message_finish_protocol(self):
+    def handle_message_finish_protocol(self, msg_params=None):
         self.finished_nodes += 1
         if self.finished_nodes == self.trainer.MAX_RANK:
             self.finish()
@@ -208,7 +208,7 @@ class ServerManager(MessageManager):
             # self.log.info(head_model_avg)
             # self.log.info(tail_model_avg)
             for idx in range(start, end):
-                # self.log.info("send_model_param_to_fed_client： {}".format(idx))
+                # self.log.info("send_model_param_to_fed_clientï¼š {}".format(idx))
                 self.send_model_param_to_fed_client(idx, head_model_avg, tail_model_avg)
 
     # avg server
@@ -293,7 +293,7 @@ import logging
 import torch
 import time
 from runtime.MPI.Messaging_MPI import Message, MessageManager
-from runtime.log import Log
+from runtime.exports.log import Log
 from .client import SplitNNClient
 
 
@@ -512,3 +512,4 @@ class ClientManager(MessageManager):
     # MSG_TYPE_S2C_READY_TO_GET_MODEL
     def handle_ready_to_get_model(self, msg_params):
         self.send_model_param_to_fed_server(0)
+

@@ -1,0 +1,16 @@
+﻿artifact_uri: file:///F:/phd/Split-Experiments/Split-Framework/runtime/mlflow/mlruns/627139126214972586/381043a215254fb08dbc906d965fc154/artifacts
+end_time: 1777551420821
+entry_point_name: ''
+experiment_id: '627139126214972586'
+lifecycle_stage: active
+run_id: 381043a215254fb08dbc906d965fc154
+run_name: 5 clients | IID | resnet18
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1777551420610
+status: 3
+tags: []
+user_id: Grigoris
+
+

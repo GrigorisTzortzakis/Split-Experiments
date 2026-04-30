@@ -1,9 +1,9 @@
-"""Client-side model/trainer for the `fedavg` algorithm variant."""
+﻿"""Client-side model/trainer for the `fedavg` algorithm variant."""
 
 import torch.optim as optim
 from torch import nn
 import logging
-from runtime.log import Log
+from runtime.exports.log import Log
 
 class SplitNNClient():
 
@@ -16,17 +16,20 @@ class SplitNNClient():
 
         self.trainloader = args["trainloader"]
         self.testloader = args["testloader"]
-        # self.optimizer = optim.Adam(self.model.parameters(),
-        #                             lr=args["lr"],
-        #                             betas=(0.9, 0.999),
-        #                             eps=1e-08,
-        #                             weight_decay=0,
-        #                             amsgrad=False)
-        self.optimizer = optim.SGD(self.model.parameters(), args["lr"], momentum=0.9,
-                                   weight_decay=5e-4)
+        self.optimizer = optim.Adam(
+            self.model.parameters(),
+            lr=args["lr"],
+            betas=(0.9, 0.999),
+            eps=1e-08,
+            weight_decay=0,
+            amsgrad=False,
+        )
         self.criterion = nn.CrossEntropyLoss()
         self.device = args["device"]
-        self.local_sample_number = len(self.trainloader)
+        try:
+            self.local_sample_number = len(self.trainloader.dataset)
+        except Exception:
+            self.local_sample_number = len(self.trainloader)
         self.phase = "train"
         self.epoch_count = 0
         self.batch_idx = 0
@@ -87,3 +90,4 @@ class SplitNNClient():
         self.phase="train"
         self.model.train()
         self.reset_local_params()
+

@@ -1,0 +1,16 @@
+﻿artifact_uri: file:///F:/phd/Split-Experiments/Split-Framework/runtime/mlflow/mlruns/606703639412762799/38b72c313763471cb6945d22e5b8c583/artifacts
+end_time: 1777551441956
+entry_point_name: ''
+experiment_id: '606703639412762799'
+lifecycle_stage: active
+run_id: 38b72c313763471cb6945d22e5b8c583
+run_name: 3 clients | IID | resnet18 | 8bit | codeword/non_uniform/loyd | forward_backward
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1777551441665
+status: 3
+tags: []
+user_id: Grigoris
+
+

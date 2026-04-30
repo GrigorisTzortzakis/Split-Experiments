@@ -5,27 +5,33 @@ from typing import Any, Dict, Optional, Sequence
 
 import torch
 
+from compression.quantization.bit_packing import pack_int4, shape_numel, unpack_int4
+
 Payload = Dict[str, Any]
 
 
 @dataclass(frozen=True)
 class TruncationInt8Codec:
-    """Bit-truncation codec: keep only the top 8 bits of FP32.
-
-    This codec does *not* use scaling.
+    """Arithmetic conversion to int8 with rounding and *no scaling*.
 
     Encoding:
-    - Interpret FP32 values as their raw IEEE-754 32-bit patterns.
-    - Keep only the most-significant byte (bits 31..24).
-    - Store that byte as int8.
+    - q = round(x)
+    - clip q to [-128, 127]
+    - store q as int8
 
     Decoding:
-    - Restore that byte to bits 31..24 and fill the remaining 24 bits with zeros.
-    - Reinterpret back to float32.
-
-    This is a very aggressive truncation (range/precision are severely reduced),
-    but matches the requested "just cut off bits" behavior.
+    - x_hat = q cast back to float32 (no scaling)
     """
+
+    num_bits: int = 8
+
+    def _quant_bounds(self) -> tuple[int, int]:
+        bits = int(self.num_bits)
+        if bits == 8:
+            return -128, 127
+        if bits == 4:
+            return -8, 7
+        raise ValueError("num_bits must be either 8 or 4")
 
     def encode(self, x: torch.Tensor) -> Payload:
         if not isinstance(x, torch.Tensor):
@@ -34,14 +40,22 @@ class TruncationInt8Codec:
         x_detached = x.detach().to(dtype=torch.float32)
         x_cpu = x_detached.to(device="cpu")
 
-        bits = x_cpu.contiguous().view(torch.int32)
-        top_u8 = ((bits >> 24) & 0xFF).to(dtype=torch.uint8)
-        q = top_u8.view(torch.int8)
+        qmin, qmax = self._quant_bounds()
+        q = torch.round(x_cpu)
+        q = torch.clamp(q, qmin, qmax).to(dtype=torch.int8)
+
+        if int(self.num_bits) == 4:
+            stored_q, original_numel = pack_int4(q)
+        else:
+            stored_q = q
+            original_numel = int(q.numel())
 
         return {
-            "codec": "trunc_bits_int8",
-            "q": q,  # torch.int8 on CPU
+            "codec": f"trunc_noscale_int{int(self.num_bits)}",
+            "q": stored_q,
             "shape": tuple(x_cpu.shape),
+            "num_bits": int(self.num_bits),
+            "num_values": original_numel,
         }
 
     def decode(
@@ -57,16 +71,28 @@ class TruncationInt8Codec:
             raise KeyError("Invalid payload, missing key: 'q'")
 
         q = payload["q"]
-        if not isinstance(q, torch.Tensor) or q.dtype != torch.int8:
-            raise TypeError("payload['q'] must be a torch.int8 Tensor")
+        if not isinstance(q, torch.Tensor):
+            raise TypeError("payload['q'] must be a torch.Tensor")
+
+        num_bits = int(payload.get("num_bits", self.num_bits))
+        if num_bits == 8:
+            if q.dtype != torch.int8:
+                raise TypeError("8-bit payload['q'] must be a torch.int8 Tensor")
+        elif num_bits == 4:
+            if q.dtype != torch.uint8:
+                raise TypeError("4-bit payload['q'] must be a packed torch.uint8 Tensor")
+        else:
+            raise ValueError("payload num_bits must be either 8 or 4")
 
         shape = payload.get("shape", None)
         target_device = device if device is not None else "cpu"
 
-        q_dev = q.to(device=target_device)
-        q_u8 = q_dev.view(torch.uint8)
-        bits32 = (q_u8.to(dtype=torch.int32) << 24)
-        out = bits32.view(torch.float32)
+        if num_bits == 4:
+            original_numel = int(payload.get("num_values", shape_numel(shape) if shape is not None else 0))
+            q_dev = unpack_int4(q, original_numel, device=target_device)
+        else:
+            q_dev = q.to(device=target_device)
+        out = q_dev.to(dtype=torch.float32)
 
         if shape is not None:
             if not isinstance(shape, Sequence):

@@ -2,7 +2,7 @@
 
 This folder contains non-algorithm code the framework needs to run.
 
-- `log.py`: logging helper
-- `config.py`: YAML/JSON config loader
+- `exports/`: export/config/log/plot support code
+- `mlflow/`: MLflow tracking code
 - `MPI/`: MPI-specific runtime (messaging, processes, split_api)
 """

@@ -1,4 +1,4 @@
-"""Managers (client + server) and message types for `gnn`."""
+﻿"""Managers (client + server) and message types for `gnn`."""
 
 # --- Message types -------------------------------------------------
 class MyMessage(object):
@@ -51,6 +51,7 @@ class ServerManager(MessageManager):
     def send_grads_to_client(self, receive_id, grads):
         message = Message(MyMessage.MSG_TYPE_S2C_GRADS, self.rank, receive_id)
         message.add_params(MyMessage.MSG_ARG_KEY_GRADS, grads)
+        self.annotate_tensor_distribution_message(message, self.trainer)
         self.send_message(message)
 
     def register_message_receive_handlers(self):
@@ -77,8 +78,9 @@ class ServerManager(MessageManager):
     def handle_message_validation_over(self, msg_params):
         # logging.warning("over")
         self.trainer.validation_over()
+        self.advance_dynamic_quantization_for_trainer(self.trainer)
 
-    def handle_message_finish_protocol(self):
+    def handle_message_finish_protocol(self, msg_params=None):
         self.finish()
 
 # --- Client manager ------------------------------------------------
@@ -86,7 +88,7 @@ import logging
 import torch
 import time
 from runtime.MPI.Messaging_MPI import Message, MessageManager
-from runtime.log import Log
+from runtime.exports.log import Log
 
 class ClientManager(MessageManager):
     """
@@ -165,6 +167,7 @@ class ClientManager(MessageManager):
         logging.warning("acts to {}".format(receive_id))
         message = Message(MyMessage.MSG_TYPE_C2S_SEND_ACTS, self.rank, receive_id)
         message.add_params(MyMessage.MSG_ARG_KEY_ACTS, (acts, labels))
+        self.annotate_tensor_distribution_message(message, self.trainer)
         self.send_message(message)
 
     def send_semaphore_to_client(self, receive_id):
@@ -183,3 +186,4 @@ class ClientManager(MessageManager):
     def send_finish_to_server(self, receive_id):
         message = Message(MyMessage.MSG_TYPE_C2S_PROTOCOL_FINISHED, self.rank, receive_id)
         self.send_message(message)
+

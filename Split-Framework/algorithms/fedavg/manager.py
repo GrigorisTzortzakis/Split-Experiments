@@ -1,4 +1,4 @@
-"""Managers (client + server) and message types for `fedavg`."""
+﻿"""Managers (client + server) and message types for `fedavg`."""
 
 # --- Message types -------------------------------------------------
 class MyMessage(object):
@@ -40,7 +40,7 @@ class MyMessage(object):
 from mpi4py import MPI
 import logging
 from runtime.MPI.Messaging_MPI import Message, MessageManager
-from runtime.log import Log
+from runtime.exports.log import Log
 import torch
 
 
@@ -63,6 +63,7 @@ class ServerManager(MessageManager):
         message.add_params(MyMessage.MSG_ARG_KEY_GRADS, grads)
         message.add_params(MyMessage.MSG_AGR_KEY_RESULT,
                            (self.trainer.total, self.trainer.correct, self.trainer.val_loss))
+        self.annotate_tensor_distribution_message(message, self.trainer)
         self.send_message(message)
 
     def register_message_receive_handlers(self):
@@ -71,7 +72,7 @@ class ServerManager(MessageManager):
         self.register_message_receive_handler(MyMessage.MSG_TYPE_C2S_SEND_MODEL,
                                               self.handle_message_model_param)
 
-    def handle_message_finish_protocol(self):
+    def handle_message_finish_protocol(self, msg_params=None):
         self.finished_nodes += 1
         if self.finished_nodes == self.trainer.MAX_RANK:
             self.finish()
@@ -136,7 +137,7 @@ import logging
 import torch
 import time
 from runtime.MPI.Messaging_MPI import Message, MessageManager
-from runtime.log import Log
+from runtime.exports.log import Log
 from .client import SplitNNClient
 
 
@@ -158,6 +159,8 @@ class ClientManager(MessageManager):
         # logging.info("{} begin run_forward_pass".format(self.trainer.rank))
         self.register_message_receive_handlers()
         self.run_forward_pass()
+        if self._is_finished:
+            return
         super(ClientManager, self).run()
 
     def run_forward_pass(self):
@@ -198,7 +201,7 @@ class ClientManager(MessageManager):
         self.run_forward_pass()
         self.trainer.write_log()
         self.trainer.epoch_count += 1
-        if self.trainer.epoch_count == self.trainer.MAX_EPOCH_PER_NODE and self.trainer.rank == self.trainer.MAX_RANK:
+        if self.trainer.epoch_count == self.trainer.MAX_EPOCH_PER_NODE:
             self.send_finish_to_server(self.trainer.SERVER_RANK)
             self.finish()
         else:
@@ -235,3 +238,4 @@ class ClientManager(MessageManager):
         message.add_params(MyMessage.MSG_AGR_KEY_SAMPLE_NUM,
                            self.trainer.local_sample_number)
         self.send_message(message)
+

@@ -1,4 +1,4 @@
-"""Managers (client + server) and message types for `asyVanilla2`."""
+﻿"""Managers (client + server) and message types for `asyVanilla2`."""
 
 # --- Message types -------------------------------------------------
 class MyMessage(object):
@@ -39,7 +39,7 @@ from mpi4py import MPI
 import logging
 import torch
 from runtime.MPI.Messaging_MPI import Message, MessageManager
-from runtime.log import Log
+from runtime.exports.log import Log
 
 
 class ServerManager(MessageManager):
@@ -64,6 +64,7 @@ class ServerManager(MessageManager):
         message.add_params(MyMessage.MSG_ARG_KEY_GRADS, grads)
         message.add_params(MyMessage.MSG_AGR_KEY_RESULT,
                            (self.trainer.total, self.trainer.correct, self.trainer.val_loss))
+        self.annotate_tensor_distribution_message(message, self.trainer)
         self.send_message(message)
 
     def register_message_receive_handlers(self):
@@ -103,7 +104,7 @@ class ServerManager(MessageManager):
 
         self.send_grads_to_client(self.active_node, grads)
 
-    def handle_message_finish_protocol(self):
+    def handle_message_finish_protocol(self, msg_params=None):
         self.finished_nodes += 1
         if self.finished_nodes == self.trainer.MAX_RANK:
             self.finish()
@@ -129,7 +130,7 @@ import logging
 import torch
 import time
 from runtime.MPI.Messaging_MPI import Message, MessageManager
-from runtime.log import Log
+from runtime.exports.log import Log
 from .client import SplitNNClient
 
 
@@ -228,6 +229,7 @@ class ClientManager(MessageManager):
         message.add_params(MyMessage.MSG_ARG_KEY_PHASE, self.trainer.phase)
         message.add_params(MyMessage.MSG_ARG_KEY_CLIENT_EPOCH,
                            self.trainer.epoch_count)
+        self.annotate_tensor_distribution_message(message, self.trainer)
 
         self.send_message(message)
 
@@ -248,3 +250,4 @@ class ClientManager(MessageManager):
     def save_model(self, epoc):
         torch.save(self.trainer.model,
                    "./saved_progress/attack_acts/PSL/{}/C_{}_A_{}_E_{}.pkl".format(self.args["dataset"], self.trainer.rank, self.args["partition_alpha"], epoc))
+

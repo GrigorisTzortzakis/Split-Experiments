@@ -1,10 +1,10 @@
-"""Client-side model/trainer for the `parallel_U_Shape` algorithm variant."""
+﻿"""Client-side model/trainer for the `parallel_U_Shape` algorithm variant."""
 
 import torch.optim as optim
 import torch
 import torch.nn as nn
 
-from runtime.log import Log
+from runtime.exports.log import Log
 
 
 class SplitNNClient():
@@ -131,3 +131,4 @@ class SplitNNClient():
                 recv_by_type,
             )
         )
+

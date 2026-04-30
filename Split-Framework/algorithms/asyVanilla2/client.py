@@ -1,10 +1,10 @@
-"""Client-side model/trainer for the `asyVanilla2` algorithm variant."""
+﻿"""Client-side model/trainer for the `asyVanilla2` algorithm variant."""
 
 import torch
 import torch.nn as nn
 import torch.optim as optim
 import logging
-from runtime.log import Log
+from runtime.exports.log import Log
 
 from collections import Iterator
 
@@ -140,3 +140,4 @@ class SplitNNClient():
                 recv_by_type,
             )
         )
+

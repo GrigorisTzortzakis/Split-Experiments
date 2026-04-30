@@ -5,23 +5,27 @@ from typing import Any, Dict, Optional, Sequence
 
 import torch
 
+from compression.quantization.bit_packing import pack_uint4, shape_numel, unpack_uint4
+
 Payload = Dict[str, Any]
 
 
 @dataclass(frozen=True)
 class TruncationFloat8Codec:
-    """Software FP8 (1 byte) activation compression.
+    """Software low-bit floating-point activation compression.
 
     This is a true floating-point *encoding* (not int quantization):
     - 1 sign bit
     - small exponent field
     - small mantissa field
 
-    Supported layout:
-    - E4M3: 4 exponent bits, 3 mantissa bits (bias=7)
+    Supported layouts:
+    - E4M3: 8 total bits, 4 exponent bits, 3 mantissa bits (bias=7)
+    - E2M1: 4 total bits, 2 exponent bits, 1 mantissa bit (bias=1)
 
     Notes:
-    - Encodes to a torch.uint8 tensor (packed FP8 bits) on CPU.
+    - Encodes to a torch.uint8 tensor on CPU.
+    - E2M1 values are nibble-packed, two values per byte.
     - Decodes back to float32 by default (or requested dtype/device).
     - Handles zeros, subnormals, inf, nan.
 
@@ -30,26 +34,32 @@ class TruncationFloat8Codec:
 
     layout: str = "e4m3"
 
-    def _layout_params(self) -> tuple[int, int, int, int]:
+    def _layout_params(self) -> tuple[int, int, int, int, int]:
         layout = str(self.layout).strip().lower()
         if layout in ("e4m3", "fp8_e4m3", "e4m3fn"):
             exp_bits, mant_bits, bias = 4, 3, 7
+        elif layout in ("e2m1", "fp4_e2m1", "fp4"):
+            exp_bits, mant_bits, bias = 2, 1, 1
         else:
             raise ValueError(
-                f"Unsupported FP8 layout: {self.layout!r}. Only E4M3 is supported in this codec."
+                f"Unsupported floating-point layout: {self.layout!r}. Supported: E4M3, E2M1."
             )
 
         max_exp = (1 << exp_bits) - 1
-        return exp_bits, mant_bits, bias, max_exp
+        return exp_bits, mant_bits, bias, max_exp, 1 + exp_bits + mant_bits
 
     def _codec_name(self) -> str:
+        layout = str(self.layout).strip().lower()
+        if layout in ("e2m1", "fp4_e2m1", "fp4"):
+            return "fp4_e2m1"
         return "fp8_e4m3"
 
     def encode(self, x: torch.Tensor) -> Payload:
         if not isinstance(x, torch.Tensor):
             raise TypeError(f"encode expects a torch.Tensor, got {type(x)!r}")
 
-        exp_bits, mant_bits, bias, max_exp = self._layout_params()
+        exp_bits, mant_bits, bias, max_exp, total_bits = self._layout_params()
+        sign_shift = exp_bits + mant_bits
 
         x_detached = x.detach().to(dtype=torch.float32)
         x_cpu = x_detached.to(device="cpu")
@@ -128,14 +138,23 @@ class TruncationFloat8Codec:
             q = q.clone()
             q[finite_nz] = packed
 
-        # Add sign bit (MSB)
-        q = q | (sign << 7)
+        # Add sign bit (MSB in the chosen layout)
+        q = q | (sign << sign_shift)
+
+        if total_bits == 4:
+            packed_q, original_numel = pack_uint4(q.to(dtype=torch.uint8))
+            stored_q = packed_q
+        else:
+            stored_q = q
+            original_numel = int(q.numel())
 
         return {
             "codec": self._codec_name(),
-            "q": q,  # torch.uint8 on CPU; packed FP8 bits
+            "q": stored_q,
             "shape": tuple(x_cpu.shape),
             "layout": str(self.layout).strip().lower(),
+            "num_bits": total_bits,
+            "num_values": original_numel,
         }
 
     def decode(
@@ -156,12 +175,19 @@ class TruncationFloat8Codec:
 
         # Prefer payload layout if present, otherwise use the codec's default.
         layout = payload.get("layout", self.layout)
-        exp_bits, mant_bits, bias, max_exp = TruncationFloat8Codec(layout=str(layout))._layout_params()
+        exp_bits, mant_bits, bias, max_exp, total_bits = TruncationFloat8Codec(layout=str(layout))._layout_params()
+        sign_shift = exp_bits + mant_bits
 
         target_device = device if device is not None else "cpu"
-        q_dev = q.to(device=target_device)
+        if total_bits == 4:
+            original_numel = int(payload.get("num_values", shape_numel(payload.get("shape", ()))) )
+            q_dev = unpack_uint4(q, original_numel, device=target_device)
+            if payload.get("shape", None) is not None:
+                q_dev = q_dev.reshape(tuple(int(s) for s in payload["shape"]))
+        else:
+            q_dev = q.to(device=target_device)
 
-        sign = (q_dev >> 7) & 0x1
+        sign = (q_dev >> sign_shift) & 0x1
         exp = (q_dev >> mant_bits) & ((1 << exp_bits) - 1)
         mant = q_dev & ((1 << mant_bits) - 1)
 

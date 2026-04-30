@@ -1,0 +1,99 @@
+2026-04-18 14:43:07,624 - datasetFactory - INFO - 8280 - cifar10
+2026-04-18 14:43:07,624 - datasetFactory - INFO - 2120 - cifar10
+2026-04-18 14:43:07,624 - datasetFactory - INFO - 6664 - cifar10
+2026-04-18 14:43:07,624 - datasetFactory - INFO - 16952 - cifar10
+2026-04-18 14:43:07,624 - datasetFactory - INFO - 17144 - cifar10
+2026-04-18 14:43:07,624 - datasetFactory - INFO - 12156 - cifar10
+2026-04-18 14:43:07,625 - datasetFactory - INFO - 23320 - cifar10
+2026-04-18 14:43:08,851 - main - INFO - 18072 - Process 6 initialized with device: cpu
+2026-04-18 14:43:08,851 - SplitNN_distributed - INFO - 18072 - process_id == fed_server_rank : 6
+2026-04-18 14:43:08,853 - main - INFO - 19964 - Process 6 initialized with device: cpu
+2026-04-18 14:43:08,854 - SplitNN_distributed - INFO - 19964 - process_id == fed_server_rank : 6
+2026-04-18 14:43:09,029 - TorchvisionDatasetController - INFO - 10984 - <bound method DataPartitioner.homo of <datasets.Partition_Data.DataPartitioner object at 0x000001DADA0B4F80>>
+2026-04-18 14:43:09,029 - DataPartitioner - INFO - 10984 - homo
+2026-04-18 14:43:09,029 - TorchvisionDatasetController - INFO - 10984 - F:\phd\Split-Experiments\Split-Framework\datasets\downloads
+2026-04-18 14:43:09,029 - TorchvisionDatasetController - INFO - 12156 - <bound method DataPartitioner.homo of <datasets.Partition_Data.DataPartitioner object at 0x0000026C90AC8BC0>>
+2026-04-18 14:43:09,029 - DataPartitioner - INFO - 12156 - homo
+2026-04-18 14:43:09,029 - TorchvisionDatasetController - INFO - 6056 - <bound method DataPartitioner.homo of <datasets.Partition_Data.DataPartitioner object at 0x00000289776E9310>>
+
+2026-04-18 14:43:09,029 - DataPartitioner - INFO - 21124 - homo
+2026-04-18 14:43:09,029 - DataPartitioner - INFO - 6056 - homo
+2026-04-18 14:43:09,029 - TorchvisionDatasetController - INFO - 21124 - F:\phd\Split-Experiments\Split-Framework\datasets\downloads
+2026-04-18 14:43:09,029 - TorchvisionDatasetController - INFO - 6056 - F:\phd\Split-Experiments\Split-Framework\datasets\downloads
+2026-04-18 14:43:09,029 - TorchvisionDatasetController - INFO - 17144 - <bound method DataPartitioner.homo of <datasets.Partition_Data.DataPartitioner object at 0x0000018D578461B0>>
+2026-04-18 14:43:09,030 - DataPartitioner - INFO - 17144 - homo
+2026-04-18 14:43:09,030 - TorchvisionDatasetController - INFO - 17144 - F:\phd\Split-Experiments\Split-Framework\datasets\downloads
+2026-04-18 14:43:09,030 - TorchvisionDatasetController - INFO - 6496 - <bound method DataPartitioner.homo of <datasets.Partition_Data.DataPartitioner object at 0x000002389DC56FF0>>
+2026-04-18 14:43:09,030 - DataPartitioner - INFO - 6496 - homo
+2026-04-18 14:43:09,030 - TorchvisionDatasetController - INFO - 6496 - F:\phd\Split-Experiments\Split-Framework\datasets\downloads
+2026-04-18 14:43:09,030 - TorchvisionDatasetController - INFO - 15340 - <bound method DataPartitioner.homo of <datasets.Partition_Data.DataPartitioner object at 0x0000019F68979100>>
+2026-04-18 14:43:09,030 - DataPartitioner - INFO - 15340 - homo
+3320 - <bound method DataPartitioner.homo of <datasets.Partition_Data.DataPartitioner object at 0x00000166FB66E9C0>>
+2026-04-18 14:43:09,030 - TorchvisionDatasetController - INFO - 16952 - <bound method DataPartitioner.homo of <datasets.Partition_Data.DataPartitioner object at 0x00000223FD939910>>
+2026-04-18 14:43:09,030 - DataPartitioner - INFO - 23320 - homo
+2026-04-18 14:43:09,030 - DataPartitioner - INFO - 16952 - homo
+5340 - F:\phd\Split-Experiments\Split-Framework\datasets\downloads2026-04-18 14:43:09,030 - TorchvisionDatasetController - INFO - 23320 - F:\phd\Split-Experiments\Split-Framework\datasets\downloads
+2026-04-18 14:43:09,030 - TorchvisionDatasetController - INFO - 16952 - F:\phd\Split-Experiments\Split-Framework\datasets\downloads
+2026-04-18 14:43:09,554 - init_fed_server - INFO - 18072 - FedServer run begin SplitFed2
+2026-04-18 14:43:09,554 - init_fed_server - INFO - 19964 - FedServer run begin SplitFed2
+2026-04-18 14:43:09,949 - TorchvisionDatasetController - INFO - 2120 - <bound method DataPartitioner.homo of <datasets.Partition_Data.DataPartitioner object at 0x00000272D22F3F20>>
+2026-04-18 14:43:09,949 - DataPartitioner - INFO - 2120 - homo
+2026-04-18 14:43:09,950 - TorchvisionDatasetController - INFO - 2120 - F:\phd\Split-Experiments\Split-Framework\datasets\downloads
+2026-04-18 14:43:09,950 - TorchvisionDatasetController - INFO - 6664 - <bound method DataPartitioner.homo of <datasets.Partition_Data.DataPartitioner object at 0x0000013B8C5B9130>>
+2026-04-18 14:43:09,950 - DataPartitioner - INFO - 6664 - homo
+2026-04-18 14:43:09,950 - TorchvisionDatasetController - INFO - 6664 - F:\phd\Split-Experiments\Split-Framework\datasets\downloads
+2026-04-18 14:43:16,653 - TorchvisionDatasetController - INFO - 6496 - rank = 5, local_sample_number = 10000
+
+2026-04-18 14:43:16,653 - TorchvisionDatasetController - INFO - 21124 - rank = 2, local_sample_number = 100002026-04-18 14:43:16,653 - TorchvisionDatasetController - INFO - 23320 - rank = 3, local_sample_number = 10000
+2026-04-18 14:43:19,579 - TorchvisionDatasetController - INFO - 2120 - train_dl_global number = 781
+n_local = 156, batch_num_test_local = 157
+
+2026-04-18 14:43:19,579 - TorchvisionDatasetController - INFO - 6496 - process_id = 5, batch_num_train_local = 156, batch_num_test_local = 157
+2026-04-18 14:43:19,579 - TorchvisionDatasetController - INFO - 12156 - process_id = 5, batch_num_train_local = 156, batch_num_test_local = 1572026-04-18 14:43:19,579 - TorchvisionDatasetController - INFO - 15340 - process_id = 4, batch_num_train_local = 156, batch_num_test_local = 157
+2026-04-18 14:43:19,580 - TorchvisionDatasetController - INFO - 2120 - test_dl_global number = 157
+ain_local = 156, batch_num_test_local = 157
+2026-04-18 14:43:19,580 - TorchvisionDatasetController - INFO - 6664 - test_dl_global number = 157
+2026-04-18 14:43:19,607 - main - INFO - 2120 - Process 0 initialized with device: cuda:0
+2026-04-18 14:43:19,608 - SplitNN_distributed - INFO - 2120 - process_id == server_rank : 0
+2026-04-18 14:43:19,611 - main - INFO - 6664 - Process 0 initialized with device: cuda:0
+2026-04-18 14:43:19,612 - SplitNN_distributed - INFO - 6664 - process_id == server_rank : 0
+2026-04-18 14:43:19,614 - main - INFO - 16952 - Process 2 initialized with device: cpu
+2026-04-18 14:43:19,614 - SplitNN_distributed - INFO - 16952 - process_id == client_rank : 2
+2026-04-18 14:43:19,616 - main - INFO - 6496 - Process 5 initialized with device: cpu
+2026-04-18 14:43:19,616 - main - INFO - 6056 - Process 3 initialized with device: cpu
+2026-04-18 14:43:19,616 - main - INFO - 23320 - Process 3 initialized with device: cpu
+2026-04-18 14:43:19,617 - SplitNN_distributed - INFO - 6496 - process_id == client_rank : 5
+2026-04-18 14:43:19,617 - SplitNN_distributed - INFO - 6056 - process_id == client_rank : 3
+2026-04-18 14:43:19,617 - SplitNN_distributed - INFO - 23320 - process_id == client_rank : 3
+2026-04-18 14:43:19,617 - main - INFO - 17144 - Process 1 initialized with device: cpu
+2026-04-18 14:43:19,618 - SplitNN_distributed - INFO - 17144 - process_id == client_rank : 1
+2026-04-18 14:43:19,618 - main - INFO - 21124 - Process 2 initialized with device: cpu
+2026-04-18 14:43:19,618 - main - INFO - 10984 - Process 1 initialized with device: cpu
+2026-04-18 14:43:19,618 - SplitNN_distributed - INFO - 21124 - process_id == client_rank : 2
+2026-04-18 14:43:19,618 - main - INFO - 15340 - Process 4 initialized with device: cpu
+2026-04-18 14:43:19,618 - main - INFO - 12156 - Process 5 initialized with device: cpu
+2026-04-18 14:43:19,619 - SplitNN_distributed - INFO - 10984 - process_id == client_rank : 1
+2026-04-18 14:43:19,619 - SplitNN_distributed - INFO - 12156 - process_id == client_rank : 5
+2026-04-18 14:43:19,619 - SplitNN_distributed - INFO - 15340 - process_id == client_rank : 4
+2026-04-18 14:43:19,619 - main - INFO - 8280 - Process 4 initialized with device: cpu
+2026-04-18 14:43:19,619 - SplitNN_distributed - INFO - 8280 - process_id == client_rank : 4
+2026-04-18 14:43:19,723 - init_server - INFO - 6664 - Server run begin SplitFed2
+2026-04-18 14:43:19,724 - init_server - INFO - 2120 - Server run begin SplitFed2
+2026-04-18 14:43:19,987 - init_client - INFO - 10984 - Client 1 run begin
+2026-04-18 14:43:19,987 - init_client - INFO - 12156 - Client 5 run begin
+2026-04-18 14:43:19,987 - init_client - INFO - 6496 - Client 5 run begin
+
+2026-04-18 14:43:19,987 - init_client - INFO - 6056 - Client 3 run begin
+2026-04-18 14:43:19,987 - init_client - INFO - 17144 - Client 1 run begin
+2026-04-18 14:43:19,987 - init_client - INFO - 23320 - Client 3 run begin
+2026-04-18 14:43:19,987 - init_client - INFO - 15340 - Client 4 run begin
+2026-04-18 14:43:19,987 - init_client - INFO - 21124 - Client 2 run begin
+2026-04-18 14:43:25,306 - CommBreakdown - INFO - 15340 - tensor_distribution rank=4 node_type=client phase=train epoch=0 sample=early/middle/late tensor=activations[0] shape=(64, 64, 16, 16) mean=0.864343 std=1.08625 min=0 max=15.2966 mean_abs=0.864343 max_abs=15.2966 p95_abs=3.0433 p99_abs=4.69365 skewness=1.88503 kurtosis=8.00492 mean_channel_std=1.07593 std_channel_std=0.143931 max_channel_scale_over_min_channel_scale=2.4441 spread=high spread_score=1.25673 outliers=medium outlier_score=2.02561 near_zero=medium near_zero_fraction=0.351405
+
+2026-04-18 14:43:25,306 - CommBreakdown - INFO - 8280 - tensor_distribution rank=4 node_type=client phase=train epoch=0 sample=early/middle/late tensor=activations[0] shape=(64, 64, 16, 16) mean=0.864343 std=1.08625 min=0 max=15.2966 mean_abs=0.864343 max_abs=15.2966 p95_abs=3.0433 p99_abs=4.69365 skewness=1.88503 kurtosis=8.00492 mean_channel_std=1.07593 std_channel_std=0.143931 max_channel_scale_over_min_channel_scale=2.4441 spread=high spread_score=1.25673 outliers=medium outlier_score=2.02561 near_zero=medium near_zero_fraction=0.351405
+2026-04-18 14:43:25,307 - CommBreakdown - INFO - 10984 - tensor_distribution rank=1 node_type=client phase=train epoch=0 sample=early/middle/late tensor=activations[0] shape=(64, 64, 16, 16) mean=0.865103 std=1.08538 min=0 max=16.1602 mean_abs=0.865103 max_abs=16.1602 p95_abs=3.04575 p99_abs=4.69378 skewness=1.87906 kurtosis=7.97017 mean_channel_std=1.07514 std_channel_std=0.14265 max_channel_scale_over_min_channel_scale=2.80401 spread=high spread_score=1.25463 outliers=medium outlier_score=2.02845 near_zero=medium near_zero_fraction=0.350365
+2026-04-18 14:43:25,307 - CommBreakdown - INFO - 12156 - tensor_distribution rank=5 node_type=client phase=train epoch=0 sample=early/middle/late tensor=activations[0] shape=(64, 64, 16, 16) mean=0.866812 std=1.08314 min=0 max=14.1193 mean_abs=0.866812 max_abs=14.1193 p95_abs=3.0419 p99_abs=4.66848 skewness=1.84587 kurtosis=7.67991 mean_channel_std=1.07281 std_channel_std=0.143237 max_channel_scale_over_min_channel_scale=2.49371 spread=medium spread_score=1.24956 outliers=medium outlier_score=2.01134 near_zero=medium near_zero_fraction=0.35078
+2026-04-18 14:43:25,308 - CommBreakdown - INFO - 17144 - tensor_distribution rank=1 node_type=client phase=train epoch=0 sample=early/middle/late tensor=activations[0] shape=(64, 64, 16, 16) mean=0.865103 std=1.08538 min=0 max=16.1602 mean_abs=0.865103 max_abs=16.1602 p95_abs=3.04575 p99_abs=4.69378 skewness=1.87906 kurtosis=7.97017 mean_channel_std=1.07514 std_channel_std=0.14265 max_channel_scale_over_min_channel_scale=2.80401 spread=high spread_score=1.25463 outliers=medium outlier_score=2.02845 near_zero=medium near_zero_fraction=0.350365
+2026-04-18 14:43:25,308 - CommBreakdown - INFO - 21124 - tensor_distribution rank=2 node_type=client phase=train epoch=0 sample=early/middle/late tensor=activations[0] shape=(64, 64, 16, 16) mean=0.871898 std=1.07455 min=0 max=13.0919 mean_abs=0.871898 max_abs=13.0919 p95_abs=3.0263 p99_abs=4.59159 skewness=1.78517 kurtosis=7.3658 mean_channel_std=1.06598 std_channel_std=0.12918 max_channel_scale_over_min_channel_scale=2.09086 spread=medium spread_score=1.23242 outliers=medium outlier_score=1.97447 near_zero=medium near_zero_fraction=0.348119
+2026-04-18 14:43:25,308 - CommBreakdown - INFO - 23320 - tensor_distribution rank=3 node_type=client phase=train epoch=0 sample=early/middle/late tensor=activations[0] shape=(64, 64, 16, 16) mean=0.863228 std=1.08775 min=0 max=16.2712 mean_abs=0.863228 max_abs=16.2712 p95_abs=3.00721 p99_abs=4.70888 skewness=2.02342 kurtosis=9.5758 mean_channel_std=1.07718 std_channel_std=0.145249 max_channel_scale_over_min_channel_scale=2.72337 spread=high spread_score=1.26009 outliers=medium outlier_score=2.05403 near_zero=medium near_zero_fraction=0.348604
+2026-04-18 14:43:25,308 - CommBreakdown - INFO - 6496 - tensor_distribution rank=5 node_type=client phase=train epoch=0 sample=early/middle/late tensor=activations[0] shape=(64, 64, 16, 16) mean=0.866812 std=1.08314 min=0 max=14.1193 mean_abs=0.866812 max_abs=14.1193 p95_abs=3.0419 p99_abs=4.66848 skewness=1.84587 kurtosis=7.67991 mean_channel_std=1.07281 std_channel_std=0.143237 max_channel_scale_over_min_channel_scale=2.49371 spread=medium spread_score=1.24956 outliers=medium outlier_score=2.01134 near_zero=medium near_zero_fraction=0.35078

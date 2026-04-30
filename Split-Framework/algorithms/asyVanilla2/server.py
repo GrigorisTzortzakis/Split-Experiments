@@ -1,6 +1,6 @@
-"""Server-side model/trainer for the `asyVanilla2` algorithm variant."""
+﻿"""Server-side model/trainer for the `asyVanilla2` algorithm variant."""
 
-from runtime.log import Log
+from runtime.exports.log import Log
 import torch
 import torch.nn as nn
 import logging
@@ -76,3 +76,4 @@ class SplitNNServer():
         self.val_loss = 0
         self.step = 0
         self.batch_idx = 0
+

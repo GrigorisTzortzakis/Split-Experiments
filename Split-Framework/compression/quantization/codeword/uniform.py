@@ -5,6 +5,8 @@ from typing import Any, Dict, Optional, Sequence
 
 import torch
 
+from compression.quantization.bit_packing import pack_uint4, shape_numel, unpack_uint4
+
 Payload = Dict[str, Any]
 
 
@@ -34,9 +36,16 @@ class UniformCodebookUInt8Codec:
     """
 
     range_mode: str = "minmax"
+    num_bits: int = 8
 
     def _codec_name(self) -> str:
-        return "uniform_codebook_uint8"
+        return f"uniform_codebook_uint{int(self.num_bits)}"
+
+    def _levels(self) -> int:
+        bits = int(self.num_bits)
+        if bits not in (4, 8):
+            raise ValueError("num_bits must be either 8 or 4")
+        return 1 << bits
 
     @staticmethod
     def _as_cpu_f32(x: torch.Tensor) -> torch.Tensor:
@@ -61,10 +70,10 @@ class UniformCodebookUInt8Codec:
         x_cpu = self._as_cpu_f32(x)
         x_min, x_max = self._compute_endpoints(x_cpu)
 
-        levels = 256
+        levels = self._levels()
         if x_max == x_min:
             codebook = torch.full((levels,), x_min, dtype=torch.float32)
-            q = torch.zeros_like(x_cpu, dtype=torch.uint8)
+            idx_u8 = torch.zeros_like(x_cpu, dtype=torch.uint8)
         else:
             codebook = torch.linspace(x_min, x_max, steps=levels, dtype=torch.float32)
             step = (x_max - x_min) / float(levels - 1)
@@ -72,14 +81,22 @@ class UniformCodebookUInt8Codec:
             # Index to nearest codeword
             idx = torch.round((x_cpu - x_min) / step)
             idx = torch.clamp(idx, 0, levels - 1).to(dtype=torch.int64)
-            q = idx.to(dtype=torch.uint8)
+            idx_u8 = idx.to(dtype=torch.uint8)
+
+        if int(self.num_bits) == 4:
+            q, original_numel = pack_uint4(idx_u8)
+        else:
+            q = idx_u8
+            original_numel = int(idx_u8.numel())
 
         return {
             "codec": self._codec_name(),
-            "q": q,  # torch.uint8 on CPU
+            "q": q,
             "codebook": codebook,  # torch.float32 on CPU
             "shape": tuple(x_cpu.shape),
             "range_mode": str(self.range_mode).strip().lower(),
+            "num_bits": int(self.num_bits),
+            "num_values": original_numel,
         }
 
     def decode(
@@ -103,13 +120,22 @@ class UniformCodebookUInt8Codec:
         codebook = payload["codebook"]
         if not isinstance(codebook, torch.Tensor) or codebook.dtype != torch.float32 or codebook.ndim != 1:
             raise TypeError("payload['codebook'] must be a 1D torch.float32 Tensor")
-        if int(codebook.numel()) != 256:
-            raise ValueError("payload['codebook'] must have 256 entries")
+        num_bits = int(payload.get("num_bits", self.num_bits))
+        if num_bits not in (4, 8):
+            raise ValueError("payload num_bits must be either 8 or 4")
+        if int(codebook.numel()) != (1 << num_bits):
+            raise ValueError(f"payload['codebook'] must have {1 << num_bits} entries")
 
         shape = payload.get("shape", None)
         target_device = device if device is not None else "cpu"
 
-        q_dev = q.to(device=target_device)
+        if num_bits == 4:
+            original_numel = int(payload.get("num_values", shape_numel(shape) if shape is not None else 0))
+            q_dev = unpack_uint4(q, original_numel, device=target_device)
+            if shape is not None:
+                q_dev = q_dev.reshape(tuple(int(s) for s in shape))
+        else:
+            q_dev = q.to(device=target_device)
         cb_dev = codebook.to(device=target_device)
 
         # Table lookup

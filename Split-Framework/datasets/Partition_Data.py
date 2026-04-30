@@ -1,11 +1,11 @@
-"""Datasets: partitioning logic for split/federated experiments."""
+﻿"""Datasets: partitioning logic for split/federated experiments."""
 
 import logging
 
 import numpy as np
 import torch
 
-from runtime.log import Log
+from runtime.exports.log import Log
 
 
 def record_net_data_stats(y_train, net_dataidx_map):
@@ -25,10 +25,7 @@ class DataPartitioner:
         self.log = Log(self.__class__.__name__, parse)
 
     def _partition_client_number(self) -> int:
-        partition_n = self.parse["partition_client_number"]
-        if partition_n is None:
-            partition_n = self.parse["client_number"]
-        return int(partition_n)
+        return int(self.parse["client_number"])
 
     def get(self):
         partition_method = self.parse["partition_method"]
@@ -340,3 +337,4 @@ class DataPartitioner:
 
 def get_partition_callable(parse):
     return DataPartitioner(parse).get()
+

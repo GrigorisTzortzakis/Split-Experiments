@@ -1,6 +1,6 @@
-"""Datasets: factory for selecting/building datasets and loaders."""
+﻿"""Datasets: factory for selecting/building datasets and loaders."""
 
-from runtime.log import Log
+from runtime.exports.log import Log
 
 from .Dataset_Loader import TorchvisionDatasetController
 
@@ -15,9 +15,9 @@ class DatasetFactory:
 
     def _get_controller(self, dataset_name: str):
         dataset_name = self._normalize_dataset_name(dataset_name)
-        if dataset_name not in ("mnist", "cifar10"):
+        if dataset_name not in ("cifar10", "cifar100", "ag_news"):
             raise ValueError(
-                f"Unknown dataset: {dataset_name}. Split-Framework keeps only: mnist, cifar10"
+                f"Unknown dataset: {dataset_name}. Split-Framework keeps only: cifar10, cifar100, ag_news"
             )
         return TorchvisionDatasetController(self.parse, dataset_name=dataset_name)
 
@@ -43,3 +43,4 @@ class DatasetFactory:
 # Backwards-compatible alias (kept so experiments/main.py can stay stable if needed).
 class datasetFactory(DatasetFactory):
     pass
+

@@ -1,4 +1,4 @@
-"""Managers (client + server) and message types for `parallel_U_Shape`."""
+﻿"""Managers (client + server) and message types for `parallel_U_Shape`."""
 
 # --- Message types -------------------------------------------------
 class MyMessage(object):
@@ -141,8 +141,9 @@ class ServerManager(MessageManager):
     def handle_message_validation_over(self, msg_params):
         # logging.warning("over")
         self.trainer.validation_over()
+        self.advance_dynamic_quantization_for_trainer(self.trainer)
 
-    def handle_message_finish_protocol(self):
+    def handle_message_finish_protocol(self, msg_params=None):
         self.finish()
 
     def send_grads_to_client(self, receive_id, grads):
@@ -193,7 +194,7 @@ import torch
 import time
 import sys
 from runtime.MPI.Messaging_MPI import Message, MessageManager
-from runtime.log import Log
+from runtime.exports.log import Log
 
 
 class ClientManager(MessageManager):
@@ -341,3 +342,4 @@ class ClientManager(MessageManager):
         logging.info("{} handle_train_sign ".format(self.trainer.rank))
         self.trainer.train_mode()
         self.run_forward_pass()
+

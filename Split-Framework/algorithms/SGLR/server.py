@@ -1,4 +1,4 @@
-"""Server-side model/trainer for the `SGLR` algorithm variant."""
+﻿"""Server-side model/trainer for the `SGLR` algorithm variant."""
 
 import torch
 import torch.nn as nn
@@ -8,7 +8,7 @@ import random
 
 sys.path.extend("../../../")
 
-from runtime.log import Log
+from runtime.exports.log import Log
 
 
 class SplitNNServer():
@@ -132,3 +132,4 @@ class SplitNNServer():
         self.val_loss = 0
         self.step = 0
         self.batch_idx = 0
+

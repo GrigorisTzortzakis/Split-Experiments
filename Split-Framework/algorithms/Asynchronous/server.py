@@ -1,4 +1,4 @@
-"""Server-side model/trainer for the `Asynchronous` algorithm variant."""
+﻿"""Server-side model/trainer for the `Asynchronous` algorithm variant."""
 
 import torch
 import torch.nn as nn
@@ -7,7 +7,7 @@ import sys
 
 sys.path.extend("../../../")
 
-from runtime.log import Log
+from runtime.exports.log import Log
 
 class SplitNNServer():
     def __init__(self, args):
@@ -97,3 +97,4 @@ class SplitNNServer():
 
     def update_state(self):
         pass
+

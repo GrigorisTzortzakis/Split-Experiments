@@ -1,10 +1,10 @@
-"""Server-side message manager/coordination for `SGLR`."""
+﻿"""Server-side message manager/coordination for `SGLR`."""
 
 from mpi4py import MPI
 import logging
 from .message_define import MyMessage
 from runtime.MPI.Messaging_MPI import Message, MessageManager
-from runtime.log import Log
+from runtime.exports.log import Log
 
 
 class ServerManager(MessageManager):
@@ -72,7 +72,8 @@ class ServerManager(MessageManager):
                     self.trainer.forward_pass(acts, labels, i)
                     self.send_grads_to_client(i, grads)
 
-    def handle_message_finish_protocol(self):
+    def handle_message_finish_protocol(self, msg_params=None):
         self.finished_nodes += 1
         if self.finished_nodes == self.trainer.MAX_RANK:
             self.finish()
+

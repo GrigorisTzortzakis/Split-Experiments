@@ -1,8 +1,8 @@
-"""Client-side model/trainer for the `comp_model` algorithm variant."""
+﻿"""Client-side model/trainer for the `comp_model` algorithm variant."""
 
 import torch.optim as optim
 import logging
-from runtime.log import Log
+from runtime.exports.log import Log
 
 class SplitNNClient():
 
@@ -71,3 +71,4 @@ class SplitNNClient():
         self.phase="train"
         self.model.train()
         self.reset_local_params()
+

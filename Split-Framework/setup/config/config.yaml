@@ -1,4 +1,4 @@
-dataset: mnist
+dataset: cifar10
 device: gpu
 gpu_num_per_server: 1
 download: true
@@ -22,8 +22,9 @@ log_save_path: ./results/run.log
 
 seed: 0
 server_rank: 0
-model: LeNet
+model: resnet18
 split_layer: 1
+split_before_relu: false
 thred: 0.10
 
 partition_method_attributes: 7
@@ -41,3 +42,8 @@ SGLR_splitLR_alpha: 0.5
 save_acts_step: 0
 save_attack_acts_step: 0
 save_model_epoch: 50
+
+mlflow_enabled: false
+mlflow_tracking_uri: ""
+mlflow_experiment_name: Split-Framework
+mlflow_run_name: ""

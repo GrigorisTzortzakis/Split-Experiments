@@ -1,7 +1,7 @@
 """Datasets package.
 
 What this folder contains:
-- `Dataset_Loader.py`: MNIST/CIFAR-10 loading + transforms + truncated datasets
+- `Dataset_Loader.py`: CIFAR-10, CIFAR-100, and AG_NEWS loading + tokenization/transforms
 - `Partition_Data.py`: dataset partitioning logic
 - `Dataset_Picker.py`: dataset selection/factory helpers
 """

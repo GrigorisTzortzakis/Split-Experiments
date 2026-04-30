@@ -1,8 +1,8 @@
-"""Client-side model/trainer for the `gnn` algorithm variant."""
+﻿"""Client-side model/trainer for the `gnn` algorithm variant."""
 
 import torch.optim as optim
 import logging
-from runtime.log import Log
+from runtime.exports.log import Log
 
 
 class SplitNNClient():
@@ -76,3 +76,4 @@ class SplitNNClient():
                 recv_by_type,
             )
         )
+

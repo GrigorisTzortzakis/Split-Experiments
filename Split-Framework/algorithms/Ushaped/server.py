@@ -1,4 +1,4 @@
-"""Server-side model/trainer for the `Ushaped` algorithm variant."""
+﻿"""Server-side model/trainer for the `Ushaped` algorithm variant."""
 
 import logging
 
@@ -9,7 +9,7 @@ import sys
 
 sys.path.extend("../../../")
 
-from runtime.log import Log
+from runtime.exports.log import Log
 
 class SplitNNServer():
     def __init__(self, args):
@@ -52,4 +52,5 @@ class SplitNNServer():
     def validation_over(self):
         self.active_node = (self.active_node % self.MAX_RANK) + 1
         self.train_mode()
+
 
