@@ -1,7 +1,7 @@
-"""Truncation-only (8-bit) compression codecs."""
+"""Truncation-only compression codecs."""
 
-from .truncation_int8 import TruncationInt8Codec
-from compression.quantization.arithmetic_conversion.float8 import TruncationFloat8Codec
+from .truncation_int import TruncationInt8Codec, TruncationIntCodec
+from compression.quantization.arithmetic_conversion.float import TruncationFloatCodec
 
-__all__ = ["TruncationInt8Codec", "TruncationFloat8Codec"]
+__all__ = ["TruncationIntCodec", "TruncationInt8Codec", "TruncationFloatCodec"]
 

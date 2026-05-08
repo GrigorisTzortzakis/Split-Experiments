@@ -1722,10 +1722,22 @@ def _basic_label_from_path(log_path: Path) -> str:
     rel = log_path.as_posix().lower()
     if "/baseline/" in rel:
         return "baseline (no quant)"
-    if "/arithmetic_conversion/int8/" in rel:
-        return "int8"
-    if "/arithmetic_conversion/fp8/" in rel:
-        return "fp8"
+    match = re.search(r"/dimensionality_reduction/autoencoder/(\d+)pct/", rel)
+    if match:
+        return f"autoencoder {match.group(1)}%"
+    match = re.search(r"/dimensionality_reduction/low_rank_pca/(\d+)pct/", rel)
+    if match:
+        return f"low-rank pca {match.group(1)}%"
+    match = re.search(r"/sparsity/top_k/(\d+)pct/", rel)
+    if match:
+        return f"top-k {match.group(1)}%"
+    match = re.search(r"/sparsity/random_top_k/(\d+)pct/", rel)
+    if match:
+        return f"random top-k {match.group(1)}%"
+    if "/arithmetic_conversion/int/" in rel or "/arithmetic_conversion/int8/" in rel:
+        return "int"
+    if "/arithmetic_conversion/float/" in rel or "/arithmetic_conversion/fp8/" in rel:
+        return "float"
     if "/codeword/uniform/" in rel:
         return "uniform"
     if "/codeword/uniform_per_channel/" in rel:
@@ -1941,8 +1953,25 @@ def plot_basic_scenario_comparisons(*, log_files: List[Path], out_dir: Path) -> 
 
     wanted_order = [
         "baseline (no quant)",
-        "int8",
-        "fp8",
+        "autoencoder 12%",
+        "autoencoder 13%",
+        "autoencoder 25%",
+        "autoencoder 50%",
+        "low-rank pca 12%",
+        "low-rank pca 13%",
+        "low-rank pca 25%",
+        "low-rank pca 50%",
+        "top-k 1%",
+        "top-k 5%",
+        "top-k 10%",
+        "top-k 25%",
+        "top-k 50%",
+        "random top-k 5%",
+        "random top-k 10%",
+        "random top-k 25%",
+        "random top-k 50%",
+        "int",
+        "float",
         "uniform",
         "uniform per-channel",
         "mu-law",
@@ -1959,8 +1988,25 @@ def plot_basic_scenario_comparisons(*, log_files: List[Path], out_dir: Path) -> 
     }
     colors = {
         "baseline (no quant)": "#111111",
-        "int8": "#1b6ef3",
-        "fp8": "#d94841",
+        "autoencoder 12%": "#be123c",
+        "autoencoder 13%": "#be123c",
+        "autoencoder 25%": "#e11d48",
+        "autoencoder 50%": "#fb7185",
+        "low-rank pca 12%": "#075985",
+        "low-rank pca 13%": "#075985",
+        "low-rank pca 25%": "#0284c7",
+        "low-rank pca 50%": "#38bdf8",
+        "top-k 1%": "#6b21a8",
+        "top-k 5%": "#7c3aed",
+        "top-k 10%": "#8b5cf6",
+        "top-k 25%": "#a78bfa",
+        "top-k 50%": "#c4b5fd",
+        "random top-k 5%": "#0f766e",
+        "random top-k 10%": "#0d9488",
+        "random top-k 25%": "#14b8a6",
+        "random top-k 50%": "#5eead4",
+        "int": "#1b6ef3",
+        "float": "#d94841",
         "uniform": "#1f8f55",
         "uniform per-channel": "#2aa76a",
         "mu-law": "#d98e04",
@@ -2466,7 +2512,7 @@ def main(argv: Optional[List[str]] = None) -> int:
                 continue
             if "/reduce_comm_cost/quantization/" not in rel:
                 continue
-            if "/arithmetic_conversion/int8/" in rel or "/arithmetic_conversion/fp8/" in rel:
+            if "/arithmetic_conversion/int/" in rel or "/arithmetic_conversion/int8/" in rel or "/arithmetic_conversion/float/" in rel or "/arithmetic_conversion/fp8/" in rel:
                 selected_logs.append(path)
 
         out_dir = plots_root / (str(args.variant) if args.variant else "comparisons")

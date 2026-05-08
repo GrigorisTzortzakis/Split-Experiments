@@ -11,9 +11,14 @@
   "split_layer": 1,
   "lr": "0.01",
   "seed": 0,
-  "comm_reduction": "arithmetic_conversion",
+  "comm_reduction": "dimensionality_reduction / low_rank_pca",
   "comm_direction": "forward_backward",
-  "quantization_bits": "dynamic-seperate",
-  "forward_quantization": "int8",
-  "backward_quantization": "int8"
+  "quantization_bits": "8bit",
+  "sparsity_k": "1%",
+  "dimensionality_reduction_ratio": "25%",
+  "quantization_granularity": "per_tensor",
+  "forward_quantization": "low_rank_pca",
+  "backward_quantization": "low_rank_pca",
+  "forward_quantization_addon": "top_k",
+  "backward_quantization_addon": "top_k"
 }

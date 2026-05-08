@@ -78,7 +78,6 @@ class ServerManager(MessageManager):
     def handle_message_validation_over(self, msg_params):
         # logging.warning("over")
         self.trainer.validation_over()
-        self.advance_dynamic_quantization_for_trainer(self.trainer)
 
     def handle_message_finish_protocol(self, msg_params=None):
         self.finish()

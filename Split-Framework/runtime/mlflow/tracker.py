@@ -66,7 +66,25 @@ def _log_relative_parts(rel_log: str) -> Tuple[str, ...]:
 def _quantization_context(rel_log: str) -> Dict[str, str]:
     parts = _log_relative_parts(rel_log)
     if "quantization" not in parts:
-        return {}
+        if "combined" not in parts:
+            return {}
+        combined_index = parts.index("combined")
+        tail = list(parts[combined_index + 1 : -1])
+        if not tail:
+            return {}
+        profile = tail[0] if len(tail) >= 1 else ""
+        family = "combined"
+        variant = "+".join(part for part in tail[1:] if part and not part.endswith("bit"))
+        method = variant or family
+        return {
+            "profile": profile,
+            "family": family,
+            "variant": variant,
+            "method": method,
+            "direction": "",
+            "algorithm_leaf": "",
+            "label": " | ".join(part for part in (profile, method) if part),
+        }
 
     quantization_index = parts.index("quantization")
     tail = list(parts[quantization_index + 1 : -1])
@@ -106,16 +124,11 @@ def _quantization_context(rel_log: str) -> Dict[str, str]:
     }
 
 
-def _is_dynamic_quantization_profile(profile: str) -> bool:
-    return str(profile or "").strip().lower().startswith("dynamic-")
-
-
 def _method_experiment_name(summary: Dict[str, object], rel_log: str, *, is_quantized: bool) -> str:
     algorithm = _algorithm_name(summary, rel_log)
     suffix = "Acc"
     if is_quantized:
-        quantization = _quantization_context(rel_log)
-        suffix = "Dynamic Quantized Acc" if _is_dynamic_quantization_profile(quantization.get("profile", "")) else "Quantized Acc"
+        suffix = "Quantized Acc"
     return f"{_display_algorithm_name(algorithm)} {suffix}"
 
 
@@ -164,7 +177,7 @@ def _comparison_tags(summary: Dict[str, object], *, is_quantized: bool, rel_log:
 
 
 def _args_quantization_tags(args) -> Dict[str, str]:
-    if not bool(args.get("quantize_forward") or args.get("quantize_backward") or args.get("dynamic_quantization")):
+    if not bool(args.get("quantize_forward") or args.get("quantize_backward")):
         return {
             "quantization_profile": "",
             "quantization_family": "",
@@ -174,10 +187,41 @@ def _args_quantization_tags(args) -> Dict[str, str]:
             "quantization_label": "",
         }
 
-    profile = str(args.get("dynamic_quantization_mode") or f"{int(args.get('quantization_bits') or 8)}bit")
-    family = "dynamic" if bool(args.get("dynamic_quantization")) else "arithmetic_conversion"
     forward_method = str(args.get("forward_quantization") or "").strip()
     backward_method = str(args.get("backward_quantization") or "").strip()
+    forward_parts = [part.strip() for part in forward_method.split("+") if part.strip()]
+    backward_parts = [part.strip() for part in backward_method.split("+") if part.strip()]
+    has_combined = len(forward_parts) > 1 or len(backward_parts) > 1
+    sparse_methods = {"top_k", "topk", "top_k_sparsity", "random_top_k", "random_topk", "random_top_k_sparsity"}
+    dimensionality_methods = {"autoencoder", "low_rank_pca", "low_rank_projection", "pca_projection", "pca", "low_rank"}
+    all_methods = set(forward_parts + backward_parts)
+    if has_combined:
+        profile = f"{int(args.get('quantization_bits') or 8)}bit"
+        family = "combined"
+    elif forward_method in sparse_methods or backward_method in sparse_methods:
+        try:
+            sparsity_value = float(args.get("sparsity_k") or 1)
+            if 0.0 < sparsity_value <= 1.0:
+                sparsity_value *= 100.0
+            profile = f"{int(round(sparsity_value))}pct"
+        except Exception:
+            profile = "1pct"
+        family = "sparsity"
+    elif forward_method in dimensionality_methods or backward_method in dimensionality_methods:
+        if forward_method in {"autoencoder", "low_rank_pca", "low_rank_projection", "pca_projection", "pca", "low_rank"} or backward_method in {"autoencoder", "low_rank_pca", "low_rank_projection", "pca_projection", "pca", "low_rank"}:
+            try:
+                reduction_ratio = float(args.get("dimensionality_reduction_ratio") or 0.25)
+                if reduction_ratio > 1.0:
+                    reduction_ratio /= 100.0
+                profile = f"{int(round(reduction_ratio * 100.0))}pct"
+            except Exception:
+                profile = "25pct"
+        else:
+            profile = "chunk4_codebook64"
+        family = "dimensionality_reduction"
+    else:
+        profile = f"{int(args.get('quantization_bits') or 8)}bit"
+        family = "quantized"
 
     if bool(args.get("quantize_forward")) and bool(args.get("quantize_backward")):
         direction = "forward_backward"
@@ -216,9 +260,7 @@ def _args_experiment_name(args, *, is_quantized: bool) -> str:
     if not is_quantized:
         return f"{_display_algorithm_name(algorithm_name)} Acc"
 
-    quantization_profile = str(args.get("dynamic_quantization_mode") or "")
-    suffix = "Dynamic Quantized Acc" if bool(args.get("dynamic_quantization")) or _is_dynamic_quantization_profile(quantization_profile) else "Quantized Acc"
-    return f"{_display_algorithm_name(algorithm_name)} {suffix}"
+    return f"{_display_algorithm_name(algorithm_name)} Quantized Acc"
 
 
 COMMON_SUMMARY_METRIC_MAP = {
@@ -286,8 +328,8 @@ PARAM_KEYS = (
     "forward_quantization",
     "backward_quantization",
     "quantization_bits",
-    "dynamic_quantization",
-    "dynamic_quantization_mode",
+    "sparsity_k",
+    "dimensionality_reduction_ratio",
     "log_step",
 )
 

@@ -94,6 +94,8 @@ COMM_REDUCTION_OPTIONS: List[Tuple[str, str]] = [
     ("arithmetic_conversion", "arithmetic_conversion"),
     ("codeword", "codeword"),
     ("Truncation", "Truncation"),
+    ("sparsity", "sparsity"),
+    ("dimensionality_reduction", "dimensionality_reduction"),
 ]
 COMM_DIRECTION_OPTIONS: List[Tuple[str, str]] = [
     ("forward_backward", "both"),
@@ -101,40 +103,55 @@ COMM_DIRECTION_OPTIONS: List[Tuple[str, str]] = [
     ("backward", "backward"),
 ]
 QUANTIZATION_BITS_OPTIONS: List[Tuple[str, object]] = [
-    ("8bit-static", 8),
-    ("4bit-static", 4),
-    ("dynamic-baseline", "dynamic-baseline"),
-    ("dynamic-seperate", "dynamic-seperate"),
-    ("dynamic test 1", "dynamic-test-1"),
-    ("dynamic test 2", "dynamic-test-2"),
-    ("dynamic test 3", "dynamic-test-3"),
-    ("dynamic test 4", "dynamic-test-4"),
-    ("dynamic test 5", "dynamic-test-5"),
+    ("2bit", 2),
+    ("3bit", 3),
+    ("4bit", 4),
+    ("6bit", 6),
+    ("8bit", 8),
+    ("16bit", 16),
+    ("32bit", 32),
+]
+SPARSITY_K_OPTIONS: List[Tuple[str, int]] = [
+    ("1%", 1),
+    ("5%", 5),
+    ("10%", 10),
+    ("25%", 25),
+    ("50%", 50),
+]
+DIMENSIONALITY_REDUCTION_RATIO_OPTIONS: List[Tuple[str, float]] = [
+    ("12.5%", 0.125),
+    ("25%", 0.25),
+    ("50%", 0.5),
 ]
 QUANTIZATION_OPTIONS: List[Tuple[str, str]] = [
-    ("int8", "int8"),
-    ("int8_per_channel", "int8_per_channel"),
-    ("float8", "float8"),
+    ("int", "int"),
+    ("float", "float"),
     ("uniform", "uniform"),
-    ("uniform_per_channel", "uniform_per_channel"),
     ("non_uniform_loyd", "non_uniform_loyd"),
-    ("non_uniform_loyd_per_channel", "non_uniform_loyd_per_channel"),
     ("non_uniform_mlaw", "non_uniform_mlaw"),
-    ("non_uniform_mlaw_per_channel", "non_uniform_mlaw_per_channel"),
-    ("truncation_int8", "truncation_int8"),
+    ("truncation_int", "truncation_int"),
+    ("top_k", "top_k"),
+    ("random_top_k", "random_top_k"),
+    ("autoencoder", "autoencoder"),
+    ("low_rank_pca", "low_rank_pca"),
+]
+PIPELINE_ADDON_OPTIONS: List[Tuple[str, str]] = [("none", "none"), *QUANTIZATION_OPTIONS]
+QUANTIZATION_GRANULARITY_OPTIONS: List[Tuple[str, str]] = [
+    ("per_tensor", "per_tensor"),
+    ("per_channel", "per_channel"),
+    ("per_group", "per_group"),
 ]
 
 COMM_METHODS_BY_MODE: Dict[str, Tuple[str, ...]] = {
-    "arithmetic_conversion": ("int8", "int8_per_channel", "float8"),
+    "arithmetic_conversion": ("int", "float"),
     "codeword": (
         "uniform",
-        "uniform_per_channel",
         "non_uniform_loyd",
-        "non_uniform_loyd_per_channel",
         "non_uniform_mlaw",
-        "non_uniform_mlaw_per_channel",
     ),
-    "Truncation": ("truncation_int8",),
+    "Truncation": ("truncation_int",),
+    "sparsity": ("top_k", "random_top_k"),
+    "dimensionality_reduction": ("autoencoder", "low_rank_pca"),
 }
 
 
@@ -263,9 +280,14 @@ class ExperimentMenu:
         self.partition_map: Dict[str, str] = {label: value for label, value, _alpha in PARTITION_OPTIONS}
         self.partition_alpha_map: Dict[str, Optional[float]] = {label: alpha for label, _value, alpha in PARTITION_OPTIONS}
         self.comm_reduction_map: Dict[str, str] = {label: value for label, value in COMM_REDUCTION_OPTIONS}
+        self.mode_selection_map: Dict[str, Tuple[str, Optional[str]]] = self._build_mode_selection_map()
         self.comm_direction_map: Dict[str, str] = {label: value for label, value in COMM_DIRECTION_OPTIONS}
         self.quantization_bits_map: Dict[str, object] = {label: value for label, value in QUANTIZATION_BITS_OPTIONS}
+        self.sparsity_k_map: Dict[str, int] = {label: value for label, value in SPARSITY_K_OPTIONS}
+        self.dimensionality_reduction_ratio_map: Dict[str, float] = {label: value for label, value in DIMENSIONALITY_REDUCTION_RATIO_OPTIONS}
+        self.quantization_granularity_map: Dict[str, str] = {label: value for label, value in QUANTIZATION_GRANULARITY_OPTIONS}
         self.quantization_map: Dict[str, str] = {label: value for label, value in QUANTIZATION_OPTIONS}
+        self.pipeline_addon_map: Dict[str, str] = {label: value for label, value in PIPELINE_ADDON_OPTIONS}
 
         self.algorithm_var = tk.StringVar(value=self._default_algorithm_label())
         self.model_var = tk.StringVar(value=self._default_model_label())
@@ -286,9 +308,15 @@ class ExperimentMenu:
         self.comm_reduction_var = tk.StringVar(value=self._default_comm_reduction_label())
         self.comm_direction_var = tk.StringVar(value=self._default_comm_direction_label())
         self.quantization_bits_var = tk.StringVar(value=self._default_quantization_bits_label())
+        self.sparsity_k_var = tk.StringVar(value=self._default_sparsity_k_label())
+        self.dimensionality_reduction_ratio_var = tk.StringVar(value=self._default_dimensionality_reduction_ratio_label())
+        self.quantization_granularity_var = tk.StringVar(value=self._default_quantization_granularity_label())
         self.forward_quantization_var = tk.StringVar(value=self._default_quantization_label("forward_quantization"))
         self.backward_quantization_var = tk.StringVar(value=self._default_quantization_label("backward_quantization"))
+        self.forward_quantization_addon_var = tk.StringVar(value=self._default_quantization_addon_label("forward_quantization"))
+        self.backward_quantization_addon_var = tk.StringVar(value=self._default_quantization_addon_label("backward_quantization"))
         self._syncing_quantization_fields = False
+        self._syncing_mode_selection = False
 
         self.status_var = tk.StringVar(value="Idle")
         self.command_preview_var = tk.StringVar(value="")
@@ -357,9 +385,77 @@ class ExperimentMenu:
             "comm_reduction": self.comm_reduction_var.get(),
             "comm_direction": self.comm_direction_var.get(),
             "quantization_bits": self.quantization_bits_var.get(),
+            "sparsity_k": self.sparsity_k_var.get(),
+            "dimensionality_reduction_ratio": self.dimensionality_reduction_ratio_var.get(),
+            "quantization_granularity": self.quantization_granularity_var.get(),
             "forward_quantization": self.forward_quantization_var.get(),
             "backward_quantization": self.backward_quantization_var.get(),
+            "forward_quantization_addon": self.forward_quantization_addon_var.get(),
+            "backward_quantization_addon": self.backward_quantization_addon_var.get(),
         }
+
+    def _split_quantization_pipeline(self, value: object) -> Tuple[str, str]:
+        raw = str(value or "").strip().lower()
+        if not raw:
+            return "int", "none"
+        parts = [part.strip() for part in raw.split("+") if part.strip()]
+        primary = parts[0] if parts else "int"
+        addon = parts[1] if len(parts) > 1 else "none"
+        return primary, addon
+
+    def _compose_quantization_pipeline(self, primary_label: str, addon_label: str) -> str:
+        primary = self.quantization_map.get(primary_label, primary_label)
+        addon = self.pipeline_addon_map.get(addon_label, addon_label)
+        if addon in {"", "none", primary}:
+            return str(primary)
+        return f"{primary}+{addon}"
+
+    def _build_mode_selection_map(self) -> Dict[str, Tuple[str, Optional[str]]]:
+        options: Dict[str, Tuple[str, Optional[str]]] = {"none": ("none", None)}
+        for label, value in COMM_REDUCTION_OPTIONS:
+            if value == "none":
+                continue
+            methods = COMM_METHODS_BY_MODE.get(value, ())
+            if not methods:
+                options[label] = (value, None)
+                continue
+            for method in methods:
+                options[self._mode_selection_label(value, method)] = (value, method)
+        return options
+
+    def _mode_selection_label(self, reduction_mode: str, method: Optional[str]) -> str:
+        if reduction_mode == "none" or not method:
+            return reduction_mode
+        return f"{reduction_mode} / {method}"
+
+    def _resolve_mode_selection(self) -> Tuple[str, Optional[str]]:
+        label = self.comm_reduction_var.get()
+        if label in self.mode_selection_map:
+            return self.mode_selection_map[label]
+        if label in self.comm_reduction_map:
+            reduction_mode = self.comm_reduction_map[label]
+            methods = COMM_METHODS_BY_MODE.get(reduction_mode, ())
+            return reduction_mode, (methods[0] if methods else None)
+        return "none", None
+
+    def _sync_mode_selection_from_codecs(self) -> None:
+        if self._syncing_mode_selection:
+            return
+        reduction_mode, _selected_method = self._resolve_mode_selection()
+        if reduction_mode == "none":
+            target_label = "none"
+        else:
+            target_method = self.forward_quantization_var.get()
+            if target_method not in COMM_METHODS_BY_MODE.get(reduction_mode, ()): 
+                methods = COMM_METHODS_BY_MODE.get(reduction_mode, ())
+                target_method = methods[0] if methods else None
+            target_label = self._mode_selection_label(reduction_mode, target_method)
+        if self.comm_reduction_var.get() != target_label:
+            self._syncing_mode_selection = True
+            try:
+                self.comm_reduction_var.set(target_label)
+            finally:
+                self._syncing_mode_selection = False
 
     def _apply_saved_state(self) -> None:
         if not self.saved_state:
@@ -398,20 +494,12 @@ class ExperimentMenu:
         self.lr_var.set(str(self.saved_state.get("lr", self.lr_var.get())))
         self.seed_var.set(_safe_int(self.saved_state.get("seed"), self.seed_var.get()))
 
-        if self.saved_state.get("comm_reduction") in self.comm_reduction_map:
-            self.comm_reduction_var.set(str(self.saved_state["comm_reduction"]))
         if self.saved_state.get("comm_direction") in self.comm_direction_map:
             self.comm_direction_var.set(str(self.saved_state["comm_direction"]))
         saved_quantization_bits = self.saved_state.get("quantization_bits")
         quantization_bit_aliases = {
             "8bit": "8bit-static",
             "4bit": "4bit-static",
-            "dynamic": "dynamic-baseline",
-            "dynamic-test-1": "dynamic test 1",
-            "dynamic-test-2": "dynamic test 2",
-            "dynamic-test-3": "dynamic test 3",
-            "dynamic-test-4": "dynamic test 4",
-            "dynamic-test-5": "dynamic test 5",
         }
         if saved_quantization_bits in quantization_bit_aliases:
             saved_quantization_bits = quantization_bit_aliases[str(saved_quantization_bits)]
@@ -419,11 +507,48 @@ class ExperimentMenu:
         if saved_quantization_bits in valid_quantization_bits:
             self.quantization_bits_var.set(str(saved_quantization_bits))
 
+        saved_sparsity_k = self.saved_state.get("sparsity_k")
+        valid_sparsity_k = {label for label, _value in SPARSITY_K_OPTIONS}
+        if saved_sparsity_k in valid_sparsity_k:
+            self.sparsity_k_var.set(str(saved_sparsity_k))
+
+        saved_dimensionality_ratio = self.saved_state.get("dimensionality_reduction_ratio")
+        valid_dimensionality_ratios = {label for label, _value in DIMENSIONALITY_REDUCTION_RATIO_OPTIONS}
+        if saved_dimensionality_ratio in valid_dimensionality_ratios:
+            self.dimensionality_reduction_ratio_var.set(str(saved_dimensionality_ratio))
+
+        saved_quantization_granularity = str(self.saved_state.get("quantization_granularity") or "").strip().lower()
+        valid_quantization_granularities = {label for label, _value in QUANTIZATION_GRANULARITY_OPTIONS}
+        if saved_quantization_granularity in valid_quantization_granularities:
+            self.quantization_granularity_var.set(saved_quantization_granularity)
+
         valid_quantizations = {label for label, _value in QUANTIZATION_OPTIONS}
         if self.saved_state.get("forward_quantization") in valid_quantizations:
             self.forward_quantization_var.set(str(self.saved_state["forward_quantization"]))
         if self.saved_state.get("backward_quantization") in valid_quantizations:
             self.backward_quantization_var.set(str(self.saved_state["backward_quantization"]))
+        else:
+            saved_forward_primary, saved_forward_addon = self._split_quantization_pipeline(self.saved_state.get("forward_quantization"))
+            saved_backward_primary, saved_backward_addon = self._split_quantization_pipeline(self.saved_state.get("backward_quantization"))
+            if saved_forward_primary in valid_quantizations:
+                self.forward_quantization_var.set(saved_forward_primary)
+                self.forward_quantization_addon_var.set(saved_forward_addon if saved_forward_addon in self.pipeline_addon_map else "none")
+            if saved_backward_primary in valid_quantizations:
+                self.backward_quantization_var.set(saved_backward_primary)
+                self.backward_quantization_addon_var.set(saved_backward_addon if saved_backward_addon in self.pipeline_addon_map else "none")
+
+        saved_comm_reduction = self.saved_state.get("comm_reduction")
+        if saved_comm_reduction in self.mode_selection_map:
+            self.comm_reduction_var.set(str(saved_comm_reduction))
+        elif saved_comm_reduction in self.comm_reduction_map:
+            reduction_mode = self.comm_reduction_map[str(saved_comm_reduction)]
+            selected_method = self.forward_quantization_var.get()
+            if selected_method not in COMM_METHODS_BY_MODE.get(reduction_mode, ()): 
+                methods = COMM_METHODS_BY_MODE.get(reduction_mode, ())
+                selected_method = methods[0] if methods else None
+            self.comm_reduction_var.set(self._mode_selection_label(reduction_mode, selected_method))
+        else:
+            self._sync_mode_selection_from_codecs()
 
     def _job_display(self, job: Job) -> str:
         return f"[{job.status}] {job.name} - {job.summary}"
@@ -518,31 +643,19 @@ class ExperimentMenu:
         enabled = bool(quantize_forward) or bool(quantize_backward) or bool(quantize_legacy)
         if not enabled:
             return "none"
-        forward_kind = str(self.defaults.get("forward_quantization") or "").strip().lower()
-        backward_kind = str(self.defaults.get("backward_quantization") or "").strip().lower()
-        kind = forward_kind or backward_kind
-        if kind in {"int8", "dynamic_symmetric_int8", "dynamic_int8", "fixed_scale_int8", "fixed_int8", "int8_per_channel", "dynamic_symmetric_int8_per_channel", "dynamic_int8_per_channel", "per_channel_int8", "fp8_e4m3", "float8_e4m3", "e4m3", "float8"}:
-            return "arithmetic_conversion"
-        if kind in {
-            "uniform",
-            "uniform_codebook_uint8",
-            "uniform_per_channel",
-            "uniform_per_channel_codebook_uint8",
-            "non_uniform_loyd",
-            "non_uniform_loyd_codebook_uint8",
-            "non_uniform_loyd_per_channel",
-            "non_uniform_loyd_per_channel_codebook_uint8",
-            "non_uniform_mlaw",
-            "mulaw_codebook_uint8",
-            "non_uniform_mlaw_per_channel",
-            "mulaw_per_channel_codebook_uint8",
-            "lloyd_max",
-            "lloyd_max_codebook_uint8",
-        }:
-            return "codeword"
-        if kind in {"truncation_int8", "trunc_noscale_int8", "trunc_bits_int8", "trunc_scale_int8"}:
-            return "Truncation"
-        return "arithmetic_conversion"
+        forward_kind, _forward_addon = self._split_quantization_pipeline(self.defaults.get("forward_quantization"))
+        backward_kind, _backward_addon = self._split_quantization_pipeline(self.defaults.get("backward_quantization"))
+        kind = self._default_quantization_label("forward_quantization") if forward_kind else self._default_quantization_label("backward_quantization")
+        reduction_mode = "arithmetic_conversion"
+        if kind in {"top_k", "random_top_k"}:
+            reduction_mode = "sparsity"
+        elif kind in {"autoencoder", "low_rank_pca"}:
+            reduction_mode = "dimensionality_reduction"
+        elif kind in {"uniform", "non_uniform_loyd", "non_uniform_mlaw"}:
+            reduction_mode = "codeword"
+        elif kind in {"truncation_int"}:
+            reduction_mode = "Truncation"
+        return self._mode_selection_label(reduction_mode, kind)
 
     def _default_comm_direction_label(self) -> str:
         quantize_forward = bool(self.defaults.get("quantize_forward")) if self.defaults.get("quantize_forward") is not None else bool(self.defaults.get("quantize_activations"))
@@ -554,63 +667,134 @@ class ExperimentMenu:
         return "forward"
 
     def _default_quantization_bits_label(self) -> str:
-        if bool(self.defaults.get("dynamic_quantization", False)):
-            mode = str(self.defaults.get("dynamic_quantization_mode") or "baseline").strip().lower().replace("_", "-").replace(" ", "-")
-            if mode in {"dynamic-seperate", "dynamic-separate", "seperate", "separate"}:
-                return "dynamic-seperate"
-            if mode in {"dynamic-test-1", "test-1", "test1"}:
-                return "dynamic test 1"
-            if mode in {"dynamic-test-2", "test-2", "test2"}:
-                return "dynamic test 2"
-            if mode in {"dynamic-test-3", "test-3", "test3"}:
-                return "dynamic test 3"
-            if mode in {"dynamic-test-4", "test-4", "test4"}:
-                return "dynamic test 4"
-            if mode in {"dynamic-test-5", "test-5", "test5"}:
-                return "dynamic test 5"
-            return "dynamic-baseline"
-        current = int(_safe_int(self.defaults.get("quantization_bits"), 8))
-        if current not in {4, 8}:
+        forward_kind, _forward_addon = self._split_quantization_pipeline(self.defaults.get("forward_quantization"))
+        backward_kind, _backward_addon = self._split_quantization_pipeline(self.defaults.get("backward_quantization"))
+        kind = self._default_quantization_label("forward_quantization") if forward_kind else self._default_quantization_label("backward_quantization")
+        current = int(_safe_int(self.defaults.get("quantization_bits"), 32 if kind in {"top_k", "random_top_k", "autoencoder", "low_rank_pca"} else 8))
+        if kind in {"top_k", "random_top_k", "autoencoder", "low_rank_pca"}:
+            if current not in {8, 16, 32}:
+                current = 32
+        elif current not in {2, 3, 4, 6, 8}:
             current = 8
-        return f"{current}bit-static"
+        return f"{current}bit"
+
+    def _default_sparsity_k_label(self) -> str:
+        current = self.defaults.get("sparsity_k")
+        try:
+            numeric = float(current)
+            if 0.0 < numeric <= 1.0:
+                numeric *= 100.0
+            normalized = int(round(numeric))
+        except Exception:
+            normalized = 0
+
+        forward_kind, _forward_addon = self._split_quantization_pipeline(self.defaults.get("forward_quantization"))
+        backward_kind, _backward_addon = self._split_quantization_pipeline(self.defaults.get("backward_quantization"))
+        kind = forward_kind or backward_kind
+        if kind in {"random_top_k", "random_topk", "random_top_k_sparsity"}:
+            if normalized not in {5, 10, 25, 50}:
+                normalized = 5
+        else:
+            if normalized not in {1, 5, 10, 25, 50}:
+                normalized = 1
+        return f"{normalized}%"
+
+    def _default_dimensionality_reduction_ratio_label(self) -> str:
+        current = self.defaults.get("dimensionality_reduction_ratio")
+        try:
+            numeric = float(current)
+            if numeric > 1.0:
+                numeric /= 100.0
+        except Exception:
+            numeric = 0.25
+        if numeric not in {0.125, 0.25, 0.5}:
+            numeric = 0.25
+        return f"{numeric * 100.0:g}%"
+
+    def _default_quantization_granularity_label(self) -> str:
+        current = str(self.defaults.get("quantization_granularity") or "").strip().lower().replace("-", "_")
+        if current in {"per_tensor", "per_channel", "per_group"}:
+            return current
+
+        forward_kind, _forward_addon = self._split_quantization_pipeline(self.defaults.get("forward_quantization"))
+        backward_kind, _backward_addon = self._split_quantization_pipeline(self.defaults.get("backward_quantization"))
+        kind = forward_kind or backward_kind
+        if kind in {
+            "dynamic_symmetric_int8_per_channel",
+            "dynamic_int8_per_channel",
+            "int8_per_channel",
+            "per_channel_int8",
+            "uniform_per_channel",
+            "uniform_per_channel_codebook_uint8",
+            "non_uniform_loyd_per_channel",
+            "non_uniform_loyd_per_channel_codebook_uint8",
+            "non_uniform_mlaw_per_channel",
+            "mulaw_per_channel_codebook_uint8",
+            "mu_law_per_channel",
+            "mlaw_per_channel",
+        }:
+            return "per_channel"
+        return "per_tensor"
 
     def _default_quantization_label(self, key: str) -> str:
-        current = str(self.defaults.get(key) or "dynamic_symmetric_int8").strip().lower()
+        current, _addon = self._split_quantization_pipeline(self.defaults.get(key) or "int")
         alias_map = {
-            "dynamic_symmetric_int8": "int8",
-            "dynamic_int8": "int8",
-            "int8": "int8",
-            "dynamic_symmetric_int8_per_channel": "int8_per_channel",
-            "dynamic_int8_per_channel": "int8_per_channel",
-            "int8_per_channel": "int8_per_channel",
-            "per_channel_int8": "int8_per_channel",
-            "fp8_e4m3": "float8",
-            "float8_e4m3": "float8",
-            "e4m3": "float8",
-            "float8": "float8",
+            "dynamic_symmetric_int8": "int",
+            "dynamic_int8": "int",
+            "int8": "int",
+            "int": "int",
+            "dynamic_symmetric_int8_per_channel": "int",
+            "dynamic_int8_per_channel": "int",
+            "int8_per_channel": "int",
+            "per_channel_int8": "int",
+            "fixed_scale_int8": "int",
+            "fixed_int8": "int",
+            "fp8_e4m3": "float",
+            "float8_e4m3": "float",
+            "e4m3": "float",
+            "float8": "float",
+            "float": "float",
             "uniform_codebook_uint8": "uniform",
             "uniform": "uniform",
-            "uniform_per_channel_codebook_uint8": "uniform_per_channel",
-            "uniform_per_channel": "uniform_per_channel",
+            "uniform_per_channel_codebook_uint8": "uniform",
+            "uniform_per_channel": "uniform",
             "non_uniform_loyd_codebook_uint8": "non_uniform_loyd",
             "non_uniform_loyd": "non_uniform_loyd",
-            "non_uniform_loyd_per_channel_codebook_uint8": "non_uniform_loyd_per_channel",
-            "non_uniform_loyd_per_channel": "non_uniform_loyd_per_channel",
-            "loyd_per_channel": "non_uniform_loyd_per_channel",
+            "non_uniform_loyd_per_channel_codebook_uint8": "non_uniform_loyd",
+            "non_uniform_loyd_per_channel": "non_uniform_loyd",
+            "loyd_per_channel": "non_uniform_loyd",
             "mulaw_codebook_uint8": "non_uniform_mlaw",
             "non_uniform_mlaw": "non_uniform_mlaw",
-            "mulaw_per_channel_codebook_uint8": "non_uniform_mlaw_per_channel",
-            "non_uniform_mlaw_per_channel": "non_uniform_mlaw_per_channel",
-            "mu_law_per_channel": "non_uniform_mlaw_per_channel",
-            "mlaw_per_channel": "non_uniform_mlaw_per_channel",
-            "trunc_noscale_int8": "truncation_int8",
-            "trunc_bits_int8": "truncation_int8",
-            "trunc_scale_int8": "truncation_int8",
-            "truncation_int8": "truncation_int8",
+            "mulaw_per_channel_codebook_uint8": "non_uniform_mlaw",
+            "non_uniform_mlaw_per_channel": "non_uniform_mlaw",
+            "mu_law_per_channel": "non_uniform_mlaw",
+            "mlaw_per_channel": "non_uniform_mlaw",
+            "trunc_noscale_int": "truncation_int",
+            "trunc_noscale_int8": "truncation_int",
+            "trunc_bits_int8": "truncation_int",
+            "trunc_scale_int8": "truncation_int",
+            "truncation_int": "truncation_int",
+            "truncation_int8": "truncation_int",
+            "top_k": "top_k",
+            "topk": "top_k",
+            "top_k_sparsity": "top_k",
+            "random_top_k": "random_top_k",
+            "random_topk": "random_top_k",
+            "random_top_k_sparsity": "random_top_k",
+            "autoencoder": "autoencoder",
+            "low_rank_pca": "low_rank_pca",
+            "low_rank_projection": "low_rank_pca",
+            "pca_projection": "low_rank_pca",
+            "pca": "low_rank_pca",
+            "low_rank": "low_rank_pca",
         }
         if current in alias_map:
             return alias_map[current]
         return QUANTIZATION_OPTIONS[0][0]
+
+    def _default_quantization_addon_label(self, key: str) -> str:
+        _primary, addon = self._split_quantization_pipeline(self.defaults.get(key) or "")
+        return addon if addon in self.pipeline_addon_map else "none"
 
     def _build_ui(self) -> None:
         self.root.configure(bg="#eef2f6")
@@ -674,15 +858,26 @@ class ExperimentMenu:
         self._add_combo(form_panel, "Device", self.device_var, [label for label, _ in DEVICE_OPTIONS], 8, 0)
 
         self._add_section_label(form_panel, 9, "Communication Reduction")
-        self._add_combo(form_panel, "Mode", self.comm_reduction_var, [label for label, _ in COMM_REDUCTION_OPTIONS], 10, 0)
+        self.mode_combo = self._add_combo(form_panel, "Mode", self.comm_reduction_var, list(self.mode_selection_map.keys()), 10, 0)
+        self.mode_combo.configure(width=32)
         self._add_combo(form_panel, "Direction", self.comm_direction_var, [label for label, _ in COMM_DIRECTION_OPTIONS], 10, 2)
-        self._add_combo(form_panel, "Bit Width", self.quantization_bits_var, [label for label, _ in QUANTIZATION_BITS_OPTIONS], 11, 0)
+        self.quantization_bits_combo = self._add_combo(form_panel, "Bit Width", self.quantization_bits_var, [label for label, _ in QUANTIZATION_BITS_OPTIONS], 11, 0)
+        self.sparsity_k_combo = self._add_combo(form_panel, "K", self.sparsity_k_var, [label for label, _ in SPARSITY_K_OPTIONS], 11, 2)
+        self.quantization_granularity_combo = self._add_combo(form_panel, "Granularity", self.quantization_granularity_var, [label for label, _ in QUANTIZATION_GRANULARITY_OPTIONS], 12, 0)
         self.forward_quantization_combo = self._add_combo(
             form_panel,
             "Forward Codec",
             self.forward_quantization_var,
             [label for label, _ in QUANTIZATION_OPTIONS],
             12,
+            2,
+        )
+        self.forward_quantization_addon_combo = self._add_combo(
+            form_panel,
+            "Forward Add-on",
+            self.forward_quantization_addon_var,
+            [label for label, _ in PIPELINE_ADDON_OPTIONS],
+            13,
             0,
         )
         self.backward_quantization_combo = self._add_combo(
@@ -690,7 +885,23 @@ class ExperimentMenu:
             "Backward Codec",
             self.backward_quantization_var,
             [label for label, _ in QUANTIZATION_OPTIONS],
-            12,
+            13,
+            2,
+        )
+        self.backward_quantization_addon_combo = self._add_combo(
+            form_panel,
+            "Backward Add-on",
+            self.backward_quantization_addon_var,
+            [label for label, _ in PIPELINE_ADDON_OPTIONS],
+            14,
+            0,
+        )
+        self.dimensionality_reduction_ratio_combo = self._add_combo(
+            form_panel,
+            "Reduced Dim",
+            self.dimensionality_reduction_ratio_var,
+            [label for label, _ in DIMENSIONALITY_REDUCTION_RATIO_OPTIONS],
+            14,
             2,
         )
 
@@ -703,10 +914,18 @@ class ExperimentMenu:
             *form_panel.grid_slaves(row=12, column=1),
             *form_panel.grid_slaves(row=12, column=2),
             *form_panel.grid_slaves(row=12, column=3),
+            *form_panel.grid_slaves(row=13, column=0),
+            *form_panel.grid_slaves(row=13, column=1),
+            *form_panel.grid_slaves(row=13, column=2),
+            *form_panel.grid_slaves(row=13, column=3),
+            *form_panel.grid_slaves(row=14, column=0),
+            *form_panel.grid_slaves(row=14, column=1),
+            *form_panel.grid_slaves(row=14, column=2),
+            *form_panel.grid_slaves(row=14, column=3),
         ]
 
         preview_label = ttk.Label(form_panel, text="Command Preview", style="Section.TLabel")
-        preview_label.grid(row=13, column=0, columnspan=4, sticky="w", pady=(18, 8))
+        preview_label.grid(row=15, column=0, columnspan=4, sticky="w", pady=(18, 8))
         preview_box = tk.Text(
             form_panel,
             height=5,
@@ -718,12 +937,12 @@ class ExperimentMenu:
             padx=10,
             pady=10,
         )
-        preview_box.grid(row=14, column=0, columnspan=4, sticky="nsew")
+        preview_box.grid(row=16, column=0, columnspan=4, sticky="nsew")
         preview_box.configure(state="disabled")
         self.preview_box = preview_box
 
         buttons = ttk.Frame(form_panel, style="Panel.TFrame")
-        buttons.grid(row=15, column=0, columnspan=4, sticky="ew", pady=(14, 0))
+        buttons.grid(row=17, column=0, columnspan=4, sticky="ew", pady=(14, 0))
         buttons.columnconfigure((0, 1, 2, 3), weight=1)
         ttk.Button(buttons, text="Add To Queue", command=self._add_job, style="Action.TButton").grid(row=0, column=0, sticky="ew", padx=(0, 8))
         ttk.Button(buttons, text="Run Queue", command=self._start_queue, style="Action.TButton").grid(row=0, column=1, sticky="ew", padx=4)
@@ -778,8 +997,13 @@ class ExperimentMenu:
             self.comm_reduction_var,
             self.comm_direction_var,
             self.quantization_bits_var,
+            self.sparsity_k_var,
+            self.dimensionality_reduction_ratio_var,
+            self.quantization_granularity_var,
             self.forward_quantization_var,
             self.backward_quantization_var,
+            self.forward_quantization_addon_var,
+            self.backward_quantization_addon_var,
         ):
             variable.trace_add("write", self._handle_form_change)
 
@@ -841,6 +1065,7 @@ class ExperimentMenu:
         self._sync_fixed_pair_state()
         self._update_partition_state()
         self._update_reduction_state()
+        self._sync_mode_selection_from_codecs()
         self._refresh_command_preview()
 
     def _sync_quantization_direction_state(self) -> None:
@@ -858,8 +1083,15 @@ class ExperimentMenu:
                     self.backward_quantization_var.set(self.forward_quantization_var.get())
                 finally:
                     self._syncing_quantization_fields = False
+            if self.backward_quantization_addon_var.get() != self.forward_quantization_addon_var.get():
+                self._syncing_quantization_fields = True
+                try:
+                    self.backward_quantization_addon_var.set(self.forward_quantization_addon_var.get())
+                finally:
+                    self._syncing_quantization_fields = False
 
         self.backward_quantization_combo.configure(state=backward_state)
+        self.backward_quantization_addon_combo.configure(state=backward_state)
 
     def _update_partition_state(self) -> None:
         partition_value = self.partition_map.get(self.partition_var.get(), "homo")
@@ -872,7 +1104,7 @@ class ExperimentMenu:
             self.partition_alpha_var.set("")
 
     def _update_reduction_state(self) -> None:
-        reduction_mode = self.comm_reduction_map.get(self.comm_reduction_var.get(), "none")
+        reduction_mode, selected_method = self._resolve_mode_selection()
         show_reduction = reduction_mode != "none"
         for widget in self.reduction_widgets:
             if show_reduction:
@@ -883,11 +1115,41 @@ class ExperimentMenu:
         allowed_methods = COMM_METHODS_BY_MODE.get(reduction_mode, tuple(label for label, _ in QUANTIZATION_OPTIONS))
         self.forward_quantization_combo.configure(values=list(allowed_methods))
         self.backward_quantization_combo.configure(values=list(allowed_methods))
+        addon_values = [label for label, _value in PIPELINE_ADDON_OPTIONS]
+        self.forward_quantization_addon_combo.configure(values=addon_values)
+        self.backward_quantization_addon_combo.configure(values=addon_values)
         if allowed_methods:
+            if selected_method in allowed_methods:
+                if self.forward_quantization_var.get() != selected_method:
+                    self.forward_quantization_var.set(selected_method)
+                if self.backward_quantization_var.get() not in allowed_methods:
+                    self.backward_quantization_var.set(selected_method)
             if self.forward_quantization_var.get() not in allowed_methods:
                 self.forward_quantization_var.set(allowed_methods[0])
             if self.backward_quantization_var.get() not in allowed_methods:
                 self.backward_quantization_var.set(allowed_methods[0])
+
+        is_sparsity = reduction_mode == "sparsity"
+        is_dimensionality_reduction = reduction_mode == "dimensionality_reduction"
+        if is_sparsity or is_dimensionality_reduction:
+            bit_values = [label for label, value in QUANTIZATION_BITS_OPTIONS if int(value) in {8, 16, 32}]
+            self.quantization_bits_combo.configure(values=bit_values, state="readonly")
+            if self.quantization_bits_var.get() not in bit_values:
+                self.quantization_bits_var.set("32bit")
+        else:
+            bit_values = [label for label, value in QUANTIZATION_BITS_OPTIONS if int(value) in {2, 3, 4, 6, 8}]
+            self.quantization_bits_combo.configure(values=bit_values, state="readonly")
+            if self.quantization_bits_var.get() not in bit_values:
+                self.quantization_bits_var.set("8bit")
+        self.quantization_granularity_combo.configure(state=("disabled" if (is_sparsity or is_dimensionality_reduction) else "readonly"))
+        selected_methods = {self.forward_quantization_var.get(), self.backward_quantization_var.get()}
+        sparsity_values = [label for label, _value in SPARSITY_K_OPTIONS if "random_top_k" not in selected_methods or label != "1%"]
+        self.sparsity_k_combo.configure(values=sparsity_values)
+        self.sparsity_k_combo.configure(state=("readonly" if is_sparsity else "disabled"))
+        if self.sparsity_k_var.get() not in sparsity_values:
+            self.sparsity_k_var.set(sparsity_values[0])
+        uses_dimensionality_ratio = bool(selected_methods & {"autoencoder", "low_rank_pca"})
+        self.dimensionality_reduction_ratio_combo.configure(state=("readonly" if (is_dimensionality_reduction and uses_dimensionality_ratio) else "disabled"))
 
         self._sync_quantization_direction_state()
 
@@ -948,36 +1210,41 @@ class ExperimentMenu:
         elif partition_value == "alpha0":
             command.extend(["--partition-alpha", "0.0"])
 
-        reduction_mode = self.comm_reduction_map[self.comm_reduction_var.get()]
+        reduction_mode, _selected_method = self._resolve_mode_selection()
         if reduction_mode != "none":
             direction = self.comm_direction_map[self.comm_direction_var.get()]
-            bits_value = self.quantization_bits_map[self.quantization_bits_var.get()]
-            if isinstance(bits_value, str) and bits_value.startswith("dynamic-"):
-                if bits_value == "dynamic-baseline":
-                    dynamic_mode = "baseline"
-                elif bits_value == "dynamic-seperate":
-                    dynamic_mode = "seperate"
-                else:
-                    dynamic_mode = bits_value.removeprefix("dynamic-")
-                command.extend([
-                    "--dynamic-quantization",
-                    "--dynamic-quantization-mode",
-                    dynamic_mode,
-                    "--quantization-bits",
-                    "8",
-                ])
+            if reduction_mode == "sparsity":
+                bits_value = self.quantization_bits_map[self.quantization_bits_var.get()]
+                command.extend(["--quantization-bits", str(bits_value)])
+                sparsity_value = self.sparsity_k_map[self.sparsity_k_var.get()]
+                command.extend(["--sparsity-k", str(sparsity_value)])
+            elif reduction_mode == "dimensionality_reduction":
+                bits_value = self.quantization_bits_map[self.quantization_bits_var.get()]
+                command.extend(["--quantization-bits", str(bits_value)])
+                if self.forward_quantization_var.get() in {"autoencoder", "low_rank_pca"} or self.backward_quantization_var.get() in {"autoencoder", "low_rank_pca"}:
+                    ratio_value = self.dimensionality_reduction_ratio_map[self.dimensionality_reduction_ratio_var.get()]
+                    command.extend(["--dimensionality-reduction-ratio", str(ratio_value)])
             else:
-                command.extend(["--no-dynamic-quantization", "--quantization-bits", str(bits_value)])
+                bits_value = self.quantization_bits_map[self.quantization_bits_var.get()]
+                granularity_value = self.quantization_granularity_map[self.quantization_granularity_var.get()]
+                command.extend(["--quantization-bits", str(bits_value)])
+                command.extend(["--quantization-granularity", granularity_value])
             if direction in {"forward", "both"}:
                 command.append("--quantize-forward")
-                forward_quantization = self.quantization_map[self.forward_quantization_var.get()]
+                forward_quantization = self._compose_quantization_pipeline(
+                    self.forward_quantization_var.get(),
+                    self.forward_quantization_addon_var.get(),
+                )
                 command.extend(["--forward-quantization", forward_quantization])
             else:
                 command.append("--no-quantize-forward")
 
             if direction in {"backward", "both"}:
                 command.append("--quantize-backward")
-                backward_quantization = self.quantization_map[self.backward_quantization_var.get()]
+                backward_quantization = self._compose_quantization_pipeline(
+                    self.backward_quantization_var.get(),
+                    self.backward_quantization_addon_var.get(),
+                )
                 command.extend(["--backward-quantization", backward_quantization])
             else:
                 command.append("--no-quantize-backward")
@@ -998,10 +1265,21 @@ class ExperimentMenu:
             self.partition_var.get(),
             f"{int(self.epochs_var.get())} epochs",
         ]
-        reduction_mode = self.comm_reduction_map[self.comm_reduction_var.get()]
+        reduction_mode, _selected_method = self._resolve_mode_selection()
         if reduction_mode != "none":
             direction = self.comm_direction_map[self.comm_direction_var.get()]
-            summary.append(f"{self.quantization_bits_var.get()} {reduction_mode}:{direction}")
+            forward_pipeline = self._compose_quantization_pipeline(self.forward_quantization_var.get(), self.forward_quantization_addon_var.get())
+            backward_pipeline = self._compose_quantization_pipeline(self.backward_quantization_var.get(), self.backward_quantization_addon_var.get())
+            if reduction_mode == "sparsity":
+                summary.append(f"{self.quantization_bits_var.get()} {self.sparsity_k_var.get()} {forward_pipeline} {reduction_mode}:{direction}")
+            elif reduction_mode == "dimensionality_reduction":
+                if self.forward_quantization_var.get() in {"autoencoder", "low_rank_pca"} or self.backward_quantization_var.get() in {"autoencoder", "low_rank_pca"}:
+                    summary.append(f"{self.quantization_bits_var.get()} {self.dimensionality_reduction_ratio_var.get()} {forward_pipeline} {reduction_mode}:{direction}")
+                else:
+                    summary.append(f"{self.quantization_bits_var.get()} {forward_pipeline} {reduction_mode}:{direction}")
+            else:
+                pipeline_text = forward_pipeline if direction != "backward" else backward_pipeline
+                summary.append(f"{self.quantization_bits_var.get()} {self.quantization_granularity_var.get()} {pipeline_text} {reduction_mode}:{direction}")
         return " | ".join(summary)
 
     def _validate_form(self) -> List[str]:
@@ -1044,13 +1322,28 @@ class ExperimentMenu:
             except (TypeError, ValueError):
                 errors.append("Dirichlet alpha must be numeric.")
 
-        reduction_mode = self.comm_reduction_map[self.comm_reduction_var.get()]
+        reduction_mode, _selected_method = self._resolve_mode_selection()
         if reduction_mode != "none":
             allowed_methods = COMM_METHODS_BY_MODE.get(reduction_mode, ())
             if self.forward_quantization_var.get() not in allowed_methods:
                 errors.append(f"Forward method must match {reduction_mode}.")
             if self.backward_quantization_var.get() not in allowed_methods:
                 errors.append(f"Backward method must match {reduction_mode}.")
+            if self.forward_quantization_addon_var.get() not in self.pipeline_addon_map:
+                errors.append("Forward add-on method is invalid.")
+            if self.backward_quantization_addon_var.get() not in self.pipeline_addon_map:
+                errors.append("Backward add-on method is invalid.")
+            if reduction_mode == "sparsity":
+                if self.sparsity_k_var.get() not in self.sparsity_k_map:
+                    errors.append("Sparsity K must be one of the supported percentages.")
+                if (
+                    "random_top_k" in {self.forward_quantization_var.get(), self.backward_quantization_var.get()}
+                    and self.sparsity_k_var.get() == "1%"
+                ):
+                    errors.append("Random Top-k supports 5%, 10%, 25%, or 50% only.")
+            if reduction_mode == "dimensionality_reduction":
+                if self.dimensionality_reduction_ratio_var.get() not in self.dimensionality_reduction_ratio_map:
+                    errors.append("Reduced dimension must be one of the supported percentages.")
 
         if not self.main_path.exists():
             errors.append(f"Missing runner: {self.main_path}")

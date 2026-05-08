@@ -138,15 +138,10 @@ def main():
     parser.add_argument("--forward-quantization", dest="forward_quantization", type=str, default=None)
     parser.add_argument("--backward-quantization", dest="backward_quantization", type=str, default=None)
     parser.add_argument("--quantization-bits", dest="quantization_bits", type=int, default=None)
-    parser.add_argument("--dynamic-quantization", dest="dynamic_quantization", action="store_true", default=None)
-    parser.add_argument("--no-dynamic-quantization", dest="dynamic_quantization", action="store_false", default=None)
-    parser.add_argument("--dynamic-quantization-mode", dest="dynamic_quantization_mode", type=str, default=None)
-    parser.add_argument("--dynamic-quantization-baseline-low-scale", dest="dynamic_quantization_baseline_low_scale", type=float, default=None)
-    parser.add_argument("--dynamic-quantization-baseline-high-scale", dest="dynamic_quantization_baseline_high_scale", type=float, default=None)
-    parser.add_argument("--dynamic-quantization-forward-low-scale", dest="dynamic_quantization_forward_low_scale", type=float, default=None)
-    parser.add_argument("--dynamic-quantization-forward-high-scale", dest="dynamic_quantization_forward_high_scale", type=float, default=None)
-    parser.add_argument("--dynamic-quantization-backward-low-scale", dest="dynamic_quantization_backward_low_scale", type=float, default=None)
-    parser.add_argument("--dynamic-quantization-backward-high-scale", dest="dynamic_quantization_backward_high_scale", type=float, default=None)
+    parser.add_argument("--quantization-granularity", dest="quantization_granularity", type=str, default=None)
+    parser.add_argument("--quantization-group-size", dest="quantization_group_size", type=int, default=None)
+    parser.add_argument("--sparsity-k", dest="sparsity_k", type=float, default=None)
+    parser.add_argument("--dimensionality-reduction-ratio", dest="dimensionality_reduction_ratio", type=float, default=None)
     parser.add_argument("--truncation-scale", dest="truncation_scale", type=float, default=None)
     parser.add_argument("--forward-truncation-scale", dest="forward_truncation_scale", type=float, default=None)
     parser.add_argument("--backward-truncation-scale", dest="backward_truncation_scale", type=float, default=None)
@@ -206,23 +201,14 @@ def main():
         args["backward_quantization"] = str(cli_args.backward_quantization)
     if cli_args.quantization_bits is not None:
         args["quantization_bits"] = int(cli_args.quantization_bits)
-    if cli_args.dynamic_quantization is not None:
-        args["dynamic_quantization"] = bool(cli_args.dynamic_quantization)
-    if cli_args.dynamic_quantization_mode is not None:
-        args["dynamic_quantization_mode"] = str(cli_args.dynamic_quantization_mode)
-        args["dynamic_quantization"] = True
-    if cli_args.dynamic_quantization_baseline_low_scale is not None:
-        args["dynamic_quantization_baseline_low_scale"] = float(cli_args.dynamic_quantization_baseline_low_scale)
-    if cli_args.dynamic_quantization_baseline_high_scale is not None:
-        args["dynamic_quantization_baseline_high_scale"] = float(cli_args.dynamic_quantization_baseline_high_scale)
-    if cli_args.dynamic_quantization_forward_low_scale is not None:
-        args["dynamic_quantization_forward_low_scale"] = float(cli_args.dynamic_quantization_forward_low_scale)
-    if cli_args.dynamic_quantization_forward_high_scale is not None:
-        args["dynamic_quantization_forward_high_scale"] = float(cli_args.dynamic_quantization_forward_high_scale)
-    if cli_args.dynamic_quantization_backward_low_scale is not None:
-        args["dynamic_quantization_backward_low_scale"] = float(cli_args.dynamic_quantization_backward_low_scale)
-    if cli_args.dynamic_quantization_backward_high_scale is not None:
-        args["dynamic_quantization_backward_high_scale"] = float(cli_args.dynamic_quantization_backward_high_scale)
+    if cli_args.quantization_granularity is not None:
+        args["quantization_granularity"] = str(cli_args.quantization_granularity)
+    if cli_args.quantization_group_size is not None:
+        args["quantization_group_size"] = int(cli_args.quantization_group_size)
+    if cli_args.sparsity_k is not None:
+        args["sparsity_k"] = float(cli_args.sparsity_k)
+    if cli_args.dimensionality_reduction_ratio is not None:
+        args["dimensionality_reduction_ratio"] = float(cli_args.dimensionality_reduction_ratio)
     if cli_args.truncation_scale is not None:
         args["truncation_scale"] = float(cli_args.truncation_scale)
     if cli_args.forward_truncation_scale is not None:
@@ -379,40 +365,87 @@ def main():
             quantization_bits = int(args["quantization_bits"] or 8)
         except Exception:
             quantization_bits = 8
-        if quantization_bits not in (4, 8):
+        if quantization_bits not in (2, 3, 4, 6, 8, 16, 32):
             quantization_bits = 8
-        try:
-            dynamic_quantization = bool(args["dynamic_quantization"])
-        except Exception:
-            dynamic_quantization = False
-        try:
-            dynamic_quantization_mode = str(args["dynamic_quantization_mode"] or "baseline").strip().lower().replace("_", "-").replace(" ", "-")
-        except Exception:
-            dynamic_quantization_mode = "baseline"
-        if dynamic_quantization_mode in {"dynamic-baseline", "baseline", ""}:
-            dynamic_quantization_mode = "baseline"
-        elif dynamic_quantization_mode in {"dynamic-seperate", "dynamic-separate", "seperate", "separate"}:
-            dynamic_quantization_mode = "seperate"
-        elif dynamic_quantization_mode in {"dynamic-test-1", "test-1", "test1"}:
-            dynamic_quantization_mode = "test-1"
-        elif dynamic_quantization_mode in {"dynamic-test-2", "test-2", "test2"}:
-            dynamic_quantization_mode = "test-2"
-        elif dynamic_quantization_mode in {"dynamic-test-3", "test-3", "test3"}:
-            dynamic_quantization_mode = "test-3"
-        elif dynamic_quantization_mode in {"dynamic-test-4", "test-4", "test4"}:
-            dynamic_quantization_mode = "test-4"
-        elif dynamic_quantization_mode in {"dynamic-test-5", "test-5", "test5"}:
-            dynamic_quantization_mode = "test-5"
-        else:
-            dynamic_quantization_mode = "baseline"
+        quantization_granularity = str(args.get("quantization_granularity") or "per_tensor").strip().lower().replace("-", "_")
+
+        def _normalize_sparsity_percent(value: object, default: int) -> int:
+            if value is None:
+                return int(default)
+            try:
+                numeric = float(value)
+            except Exception:
+                return int(default)
+            if 0.0 < numeric <= 1.0:
+                numeric *= 100.0
+            normalized = int(round(numeric))
+            return normalized if normalized in (1, 5, 10, 25, 50) else int(default)
+
+        sparsity_percent = _normalize_sparsity_percent(args.get("sparsity_k"), 1)
+
+        def _normalize_dimensionality_ratio(value: object, default: float) -> float:
+            if value is None:
+                return float(default)
+            try:
+                numeric = float(value)
+            except Exception:
+                return float(default)
+            if numeric > 1.0:
+                numeric /= 100.0
+            if numeric <= 0.0 or numeric > 1.0:
+                return float(default)
+            return float(numeric)
+
+        dimensionality_ratio = _normalize_dimensionality_ratio(args.get("dimensionality_reduction_ratio"), 0.25)
+        dimensionality_ratio_pct = max(1, int(round(dimensionality_ratio * 100.0)))
+
+        def _granularity_for_kind(kind: str) -> str:
+            if kind in (
+                "dynamic_symmetric_int8_per_channel",
+                "dynamic_int8_per_channel",
+                "int8_per_channel",
+                "per_channel_int8",
+                "uniform_per_channel_codebook_uint8",
+                "uniform_per_channel_uint8",
+                "codeword_uniform_per_channel_uint8",
+                "codeword_uniform_per_channel",
+                "uniform_per_channel",
+                "non_uniform_loyd_per_channel_codebook_uint8",
+                "non_uniform_loyd_per_channel_uint8",
+                "codeword_non_uniform_loyd_per_channel",
+                "non_uniform_loyd_per_channel",
+                "loyd_per_channel",
+                "mulaw_per_channel_codebook_uint8",
+                "mulaw_per_channel_uint8",
+                "codeword_mulaw_per_channel",
+                "non_uniform_mlaw_per_channel",
+                "mu_law_per_channel",
+                "mlaw_per_channel",
+            ):
+                return "per_channel"
+            return quantization_granularity
 
         # Map the configured codec kind to the on-disk folder hierarchy.
         # Arithmetic-conversion codecs live under quantization/<bits>bit/arithmetic_conversion/<format>/...
         # while true truncation codecs live under quantization/<bits>bit/truncation/<format>/...
-        def _tech_path_from_kind(kind: str) -> tuple[str, ...]:
-            if kind in ("fp8_e4m3", "float8_e4m3", "e4m3", "float8"):
-                return ("arithmetic_conversion", "fp4" if quantization_bits == 4 else "fp8")
+        def _tech_path_from_kind(kind: str) -> tuple[str, tuple[str, ...]]:
+            parts = tuple(part.strip() for part in str(kind or "").strip().lower().split("+") if part.strip())
+            if len(parts) > 1:
+                return ("combined", (f"{quantization_bits}bit", *parts))
+            kind = parts[0] if parts else str(kind or "").strip().lower()
+            if kind in ("top_k", "topk", "top_k_sparsity"):
+                return ("sparsity", ("top_k", f"{sparsity_percent}pct"))
+            if kind in ("random_top_k", "random_topk", "random_top_k_sparsity"):
+                random_percent = _normalize_sparsity_percent(args.get("sparsity_k"), 5)
+                return ("sparsity", ("random_top_k", f"{random_percent}pct"))
+            if kind == "autoencoder":
+                return ("dimensionality_reduction", ("autoencoder", f"{dimensionality_ratio_pct}pct"))
+            if kind in ("low_rank_pca", "low_rank_projection", "pca_projection", "pca", "low_rank"):
+                return ("dimensionality_reduction", ("low_rank_pca", f"{dimensionality_ratio_pct}pct"))
+            if kind in ("fp8_e4m3", "float8_e4m3", "e4m3", "float8", "float"):
+                return ("quantization", ("arithmetic_conversion", "float"))
             if kind in (
+                "int",
                 "dynamic_symmetric_int8",
                 "dynamic_int8",
                 "int8",
@@ -423,30 +456,28 @@ def main():
                 "fixed_scale_int8",
                 "fixed_int8",
             ):
-                if kind in ("dynamic_symmetric_int8_per_channel", "dynamic_int8_per_channel", "int8_per_channel", "per_channel_int8"):
-                    return ("arithmetic_conversion", "int4_per_channel" if quantization_bits == 4 else "int8_per_channel")
-                return ("arithmetic_conversion", "int4" if quantization_bits == 4 else "int8")
+                return ("quantization", ("arithmetic_conversion", "int", _granularity_for_kind(kind)))
             if kind in ("uniform_codebook_uint8", "uniform_codeword_uint8", "codeword_uniform_uint8", "codeword_uniform", "uniform"):
-                return ("codeword", "uniform")
+                return ("quantization", ("codeword", "uniform", _granularity_for_kind(kind)))
             if kind in ("uniform_per_channel_codebook_uint8", "uniform_per_channel_uint8", "codeword_uniform_per_channel_uint8", "codeword_uniform_per_channel", "uniform_per_channel"):
-                return ("codeword", "uniform_per_channel")
+                return ("quantization", ("codeword", "uniform", _granularity_for_kind(kind)))
             if kind in ("non_uniform_loyd_codebook_uint8", "non_uniform_loyd_uint8", "codeword_non_uniform_loyd", "non_uniform_loyd"):
-                return ("codeword", "non_uniform", "loyd")
+                return ("quantization", ("codeword", "non_uniform", "loyd", _granularity_for_kind(kind)))
             if kind in ("non_uniform_loyd_per_channel_codebook_uint8", "non_uniform_loyd_per_channel_uint8", "codeword_non_uniform_loyd_per_channel", "non_uniform_loyd_per_channel", "loyd_per_channel"):
-                return ("codeword", "non_uniform", "loyd_per_channel")
+                return ("quantization", ("codeword", "non_uniform", "loyd", _granularity_for_kind(kind)))
             if kind in ("mulaw_codebook_uint8", "mulaw_non_uniform_uint8", "codeword_non_uniform", "codeword_mulaw", "non_uniform_mlaw"):
-                return ("codeword", "non_uniform", "mu_law")
+                return ("quantization", ("codeword", "non_uniform", "mu_law", _granularity_for_kind(kind)))
             if kind in ("mulaw_per_channel_codebook_uint8", "mulaw_per_channel_uint8", "codeword_mulaw_per_channel", "non_uniform_mlaw_per_channel", "mu_law_per_channel", "mlaw_per_channel"):
-                return ("codeword", "non_uniform", "mu_law_per_channel")
+                return ("quantization", ("codeword", "non_uniform", "mu_law", _granularity_for_kind(kind)))
             if kind in ("lloyd_max_codebook_uint8", "lloyd_max_uint8", "codeword_lloyd_max", "non_uniform_lloyd_uint8", "lloyd_max"):
-                return ("codeword", "non_uniform", "lloyd_max")
-            if kind in ("trunc_noscale_int8", "trunc_bits_int8", "trunc_scale_int8", "truncation_int8"):
-                return ("truncation", "int4" if quantization_bits == 4 else "int8")
+                return ("quantization", ("codeword", "non_uniform", "lloyd_max", _granularity_for_kind(kind)))
+            if kind in ("trunc_noscale_int", "trunc_noscale_int8", "trunc_bits_int8", "trunc_scale_int8", "truncation_int", "truncation_int8"):
+                return ("quantization", ("truncation", "int", _granularity_for_kind(kind)))
             if not kind:
-                return ("unknown",)
-            return (kind,)
+                return ("quantization", ("unknown",))
+            return ("quantization", (kind,))
 
-        technique_parts = _tech_path_from_kind(fwd_kind if quantize_forward else bwd_kind)
+        reduction_family, technique_parts = _tech_path_from_kind(fwd_kind if quantize_forward else bwd_kind)
         if quantize_forward and quantize_backward:
             direction = "forward_backward"
         elif quantize_forward:
@@ -454,16 +485,13 @@ def main():
         else:
             direction = "backward"
 
-        if dynamic_quantization:
-            if dynamic_quantization_mode == "baseline":
-                bit_folder = "dynamic-baseline"
-            elif dynamic_quantization_mode == "seperate":
-                bit_folder = "dynamic-seperate"
-            else:
-                bit_folder = f"dynamic-{dynamic_quantization_mode}"
+        if reduction_family == "sparsity":
+            results_dir = reduce_root / "sparsity"
+        elif reduction_family == "combined":
+            results_dir = reduce_root / "combined"
         else:
             bit_folder = f"{quantization_bits}bit"
-        results_dir = reduce_root / "quantization" / bit_folder
+            results_dir = reduce_root / "quantization" / bit_folder
         for part in technique_parts:
             results_dir = results_dir / part
         results_dir = results_dir / direction / variant_name

@@ -218,6 +218,3 @@ class TruncationFloatCodec:
             out = out.reshape(tuple(int(s) for s in shape))
 
         return out.to(dtype=dtype)
-
-
-    TruncationFloat8Codec = TruncationFloatCodec

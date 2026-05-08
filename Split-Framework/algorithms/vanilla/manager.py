@@ -108,7 +108,6 @@ class ServerManager(MessageManager):
     def handle_message_validation_over(self, msg_params):
         # logging.warning("over")
         epoch_summary = self.trainer.validation_over()
-        self.advance_dynamic_quantization_for_trainer(self.trainer)
         self.log_epoch_summary(
             epoch=epoch_summary["epoch"],
             train_acc=epoch_summary["train_acc"],

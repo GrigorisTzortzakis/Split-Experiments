@@ -73,21 +73,20 @@ def _split_segments(
             "granularity": normalized_granularity,
             "channel_axis": resolved_axis,
             "inverse_perm": inverse_perm,
-            "segment_lengths": [int(channel_flat.shape[1])] * int(channel_flat.shape[0]),
-            "channel_group_counts": [1] * int(channel_flat.shape[0]),
+            "channel_count": int(channel_flat.shape[0]),
+            "channel_length": int(channel_flat.shape[1]) if channel_flat.ndim == 2 else 1,
         }
 
     normalized_group_size = max(1, int(group_size))
     segments: List[torch.Tensor] = []
-    segment_lengths: List[int] = []
+    channel_lengths: List[int] = []
     channel_group_counts: List[int] = []
     for index in range(channel_flat.shape[0]):
         flat_values = channel_flat[index]
+        channel_lengths.append(int(flat_values.numel()))
         group_count = 0
         for start in range(0, int(flat_values.numel()), normalized_group_size):
-            segment = flat_values[start : start + normalized_group_size]
-            segments.append(segment)
-            segment_lengths.append(int(segment.numel()))
+            segments.append(flat_values[start : start + normalized_group_size])
             group_count += 1
         channel_group_counts.append(group_count)
 
@@ -96,7 +95,8 @@ def _split_segments(
         "granularity": normalized_granularity,
         "channel_axis": resolved_axis,
         "inverse_perm": inverse_perm,
-        "segment_lengths": segment_lengths,
+        "channel_count": int(channel_flat.shape[0]),
+        "channel_lengths": channel_lengths,
         "channel_group_counts": channel_group_counts,
         "group_size": normalized_group_size,
     }
@@ -110,7 +110,7 @@ def _restore_segments(segments: Sequence[torch.Tensor], metadata: Dict[str, Any]
 
     inverse_perm = tuple(int(idx) for idx in metadata.get("inverse_perm", (0,)))
     channel_axis = int(metadata.get("channel_axis", 0))
-    channel_first_shape = (int(shape[channel_axis]) if shape else 1, *[dim for idx, dim in enumerate(shape) if idx != channel_axis])
+    channel_first_shape = (int(metadata.get("channel_count", len(segments))), *[dim for idx, dim in enumerate(shape) if idx != channel_axis])
 
     if granularity == "per_channel":
         channel_tensor = torch.stack(list(segments), dim=0).reshape(channel_first_shape)
@@ -118,80 +118,54 @@ def _restore_segments(segments: Sequence[torch.Tensor], metadata: Dict[str, Any]
 
     rebuilt_channels: List[torch.Tensor] = []
     cursor = 0
+    channel_lengths = [int(value) for value in metadata.get("channel_lengths", [])]
     channel_group_counts = [int(value) for value in metadata.get("channel_group_counts", [])]
-    segment_lengths = [int(value) for value in metadata.get("segment_lengths", [])]
-    segment_cursor = 0
-    for group_count in channel_group_counts:
-        channel_parts: List[torch.Tensor] = []
-        for _ in range(group_count):
-            channel_parts.append(segments[cursor][: segment_lengths[segment_cursor]])
-            cursor += 1
-            segment_cursor += 1
-        rebuilt_channels.append(torch.cat(channel_parts, dim=0))
+    for channel_length, group_count in zip(channel_lengths, channel_group_counts):
+        channel_parts = list(segments[cursor : cursor + group_count])
+        cursor += group_count
+        rebuilt_channels.append(torch.cat(channel_parts, dim=0)[:channel_length])
 
     channel_tensor = torch.stack(rebuilt_channels, dim=0).reshape(channel_first_shape)
     return channel_tensor.permute(inverse_perm).contiguous()
 
 
 @dataclass(frozen=True)
-class MuLawCodebookCodec:
-    """Non-uniform mu-law quantizer with configurable granularity.
+class IntCodec:
+    """Dynamic symmetric integer quantization with configurable granularity.
 
-    The codebook is generated per tensor/channel/group depending on the selected granularity.
+    - Supports 2, 3, 4, 6, and 8 bits.
+    - Supports per-tensor, per-channel, and per-group scaling.
+    - Stores values as int8 tensors for every supported bit width.
+    - Quantize: q = round(x * S)
+    - Clip: q in the signed range for the selected bit width.
+    - Send one scale per tensor/channel/group.
+    - Dequantize: x_hat = q / S
     """
 
-    range_mode: str = "minmax"
-    mu: float = 255.0
+    fixed_scale: Optional[float] = None
     num_bits: int = 8
     granularity: str = "per_tensor"
     channel_axis: int = 1
     group_size: int = 32
 
-    def _codec_name(self) -> str:
-        return "mulaw_codebook"
+    def _quant_bounds(self) -> tuple[int, int]:
+        bits = _normalize_num_bits(self.num_bits)
+        return -(1 << (bits - 1)), (1 << (bits - 1)) - 1
 
-    def _levels(self) -> int:
-        return 1 << _normalize_num_bits(self.num_bits)
+    def _codec_name(self) -> str:
+        return "dynamic_symmetric_int"
 
     @staticmethod
     def _as_cpu_f32(x: torch.Tensor) -> torch.Tensor:
-        x_detached = x.detach().to(dtype=torch.float32)
-        return x_detached.to(device="cpu")
-
-    def _compute_endpoints(self, x_cpu: torch.Tensor) -> tuple[float, float]:
-        mode = str(self.range_mode).strip().lower()
-        if mode in ("minmax", "asymmetric", "affine"):
-            x_min = float(x_cpu.min().item()) if x_cpu.numel() else 0.0
-            x_max = float(x_cpu.max().item()) if x_cpu.numel() else 0.0
-            return x_min, x_max
-        if mode in ("symmetric", "sym"):
-            a = float(x_cpu.abs().max().item()) if x_cpu.numel() else 0.0
-            return -a, a
-        raise ValueError(f"Unsupported range_mode: {self.range_mode!r}")
-
-    def _compand(self, x_norm: torch.Tensor) -> torch.Tensor:
-        mu = float(self.mu)
-        if mu <= 0:
-            raise ValueError("mu must be > 0")
-
-        x_norm = torch.clamp(x_norm, -1.0, 1.0)
-        ax = x_norm.abs()
-        log_mu = torch.log1p(torch.tensor(mu, dtype=torch.float32))
-        return torch.sign(x_norm) * (torch.log1p(mu * ax) / log_mu)
-
-    def _expand(self, y: torch.Tensor) -> torch.Tensor:
-        mu = float(self.mu)
-        if mu <= 0:
-            raise ValueError("mu must be > 0")
-
-        y = torch.clamp(y, -1.0, 1.0)
-        ay = y.abs()
-        log_mu = torch.log1p(torch.tensor(mu, dtype=torch.float32))
-        return torch.sign(y) * (torch.expm1(ay * log_mu) / mu)
+        return x.detach().to(dtype=torch.float32, device="cpu")
 
     def encode(self, x: torch.Tensor) -> Payload:
         if not isinstance(x, torch.Tensor):
             raise TypeError(f"encode expects a torch.Tensor, got {type(x)!r}")
+        if self.fixed_scale == 0:
+            raise ValueError("fixed_scale must be non-zero")
+
+        qmin, qmax = self._quant_bounds()
 
         x_cpu = self._as_cpu_f32(x)
         segments, metadata = _split_segments(
@@ -201,43 +175,32 @@ class MuLawCodebookCodec:
             group_size=self.group_size,
         )
 
+        scale_values: List[float] = []
         q_segments: List[torch.Tensor] = []
-        codebooks: List[torch.Tensor] = []
-        levels = self._levels()
         for segment in segments:
-            x_min, x_max = self._compute_endpoints(segment)
-            if x_max == x_min:
-                codebook = torch.full((levels,), x_min, dtype=torch.float32)
-                idx_u8 = torch.zeros_like(segment, dtype=torch.uint8)
+            if self.fixed_scale is None:
+                max_abs = float(segment.abs().max().item()) if segment.numel() else 0.0
+                scale = 1.0 if max_abs == 0.0 else (float(qmax) / max_abs)
             else:
-                mid = 0.5 * (x_min + x_max)
-                half = 0.5 * (x_max - x_min)
-                x_norm = (segment - mid) / half
-                y = self._compand(x_norm)
-                u = (y + 1.0) * 0.5 * float(levels - 1)
-                idx_u8 = torch.clamp(torch.round(u), 0, levels - 1).to(dtype=torch.uint8)
+                scale = float(self.fixed_scale)
+            scale_values.append(scale)
+            q_segment = torch.round(segment * scale)
+            q_segments.append(torch.clamp(q_segment, qmin, qmax).to(dtype=torch.int8))
 
-                y_levels = torch.linspace(-1.0, 1.0, steps=levels, dtype=torch.float32)
-                x_levels_norm = self._expand(y_levels)
-                codebook = (mid + half * x_levels_norm).to(dtype=torch.float32)
-
-            q_segments.append(idx_u8)
-            codebooks.append(codebook)
-
-        q = _restore_segments(q_segments, metadata)
+        stored_q = _restore_segments(q_segments, metadata)
 
         return {
             "codec": self._codec_name(),
-            "q": q,
-            "codebook": torch.stack(codebooks, dim=0),
+            "q": stored_q,
+            "scale": torch.tensor(scale_values, dtype=torch.float32),
             "shape": tuple(x_cpu.shape),
-            "range_mode": str(self.range_mode).strip().lower(),
-            "mu": float(self.mu),
             "num_bits": _normalize_num_bits(self.num_bits),
             "granularity": metadata["granularity"],
             "channel_axis": metadata.get("channel_axis"),
             "group_size": metadata.get("group_size"),
-            "segment_lengths": metadata.get("segment_lengths"),
+            "channel_count": metadata.get("channel_count"),
+            "channel_length": metadata.get("channel_length"),
+            "channel_lengths": metadata.get("channel_lengths"),
             "channel_group_counts": metadata.get("channel_group_counts"),
             "inverse_perm": metadata.get("inverse_perm"),
         }
@@ -253,64 +216,60 @@ class MuLawCodebookCodec:
             raise TypeError(f"decode expects a dict payload, got {type(payload)!r}")
         if "q" not in payload:
             raise KeyError("Invalid payload, missing key: 'q'")
-        if "codebook" not in payload:
-            raise KeyError("Invalid payload, missing key: 'codebook'")
 
         q = payload["q"]
-        if not isinstance(q, torch.Tensor) or q.dtype != torch.uint8:
-            raise TypeError("payload['q'] must be a torch.uint8 Tensor")
+        if not isinstance(q, torch.Tensor) or q.dtype != torch.int8:
+            raise TypeError("payload['q'] must be a torch.int8 Tensor")
 
-        codebook = payload["codebook"]
-        if not isinstance(codebook, torch.Tensor) or codebook.dtype != torch.float32 or codebook.ndim != 2:
-            raise TypeError("payload['codebook'] must be a 2D torch.float32 Tensor")
-        num_bits = int(payload.get("num_bits", self.num_bits))
-        if num_bits not in SUPPORTED_NUM_BITS:
-            raise ValueError(f"payload num_bits must be one of {SUPPORTED_NUM_BITS}")
-        if int(codebook.shape[1]) != (1 << num_bits):
-            raise ValueError(f"payload['codebook'] must have shape (segments, {1 << num_bits})")
+        num_bits = _normalize_num_bits(int(payload.get("num_bits", self.num_bits)))
+        scale = payload.get("scale", None)
+        if not isinstance(scale, torch.Tensor) or scale.dtype != torch.float32 or scale.ndim != 1:
+            raise TypeError("payload['scale'] must be a 1D torch.float32 Tensor")
 
         shape = payload.get("shape", None)
         target_device = device if device is not None else "cpu"
-        q_dev = q.to(device=target_device)
-        cb_dev = codebook.to(device=target_device)
 
         metadata = {
             "shape": tuple(int(s) for s in shape) if shape is not None else tuple(int(s) for s in q.shape),
             "granularity": payload.get("granularity", self.granularity),
             "channel_axis": payload.get("channel_axis", self.channel_axis),
             "group_size": payload.get("group_size", self.group_size),
-            "segment_lengths": payload.get("segment_lengths"),
+            "channel_count": payload.get("channel_count"),
+            "channel_length": payload.get("channel_length"),
+            "channel_lengths": payload.get("channel_lengths"),
             "channel_group_counts": payload.get("channel_group_counts"),
             "inverse_perm": payload.get("inverse_perm"),
         }
 
+        q_dev = q.to(device=target_device)
         q_segments, _ = _split_segments(
             q_dev.to(dtype=torch.float32),
             granularity=metadata["granularity"],
             channel_axis=int(metadata.get("channel_axis", self.channel_axis) or 0),
             group_size=int(metadata.get("group_size", self.group_size) or 1),
         )
-        if len(q_segments) != int(cb_dev.shape[0]):
-            raise ValueError("payload codebook segment count does not match quantized tensor segmentation")
 
-        out_segments = []
-        for index, q_segment in enumerate(q_segments):
-            out_segments.append(cb_dev[index, q_segment.to(dtype=torch.int64)])
+        if len(q_segments) != int(scale.shape[0]):
+            raise ValueError("payload scale segment count does not match quantized tensor segmentation")
 
-        out = _restore_segments(out_segments, metadata)
+        x_segments = [
+            q_segment / scale[index].to(device=target_device)
+            for index, q_segment in enumerate(q_segments)
+        ]
+        x = _restore_segments(x_segments, metadata)
 
-        return out.to(dtype=dtype)
+        return x.to(dtype=dtype)
 
 
 @dataclass(frozen=True)
-class MuLawPerChannelCodebookCodec(MuLawCodebookCodec):
+class PerChannelIntCodec(IntCodec):
     granularity: str = "per_channel"
 
 
 @dataclass(frozen=True)
-class MuLawPerGroupCodebookCodec(MuLawCodebookCodec):
+class PerGroupIntCodec(IntCodec):
     granularity: str = "per_group"
 
 
-MuLawCodebookUInt8Codec = MuLawCodebookCodec
-MuLawPerChannelCodebookUInt8Codec = MuLawPerChannelCodebookCodec
+TruncationInt8Codec = IntCodec
+PerChannelInt8Codec = PerChannelIntCodec

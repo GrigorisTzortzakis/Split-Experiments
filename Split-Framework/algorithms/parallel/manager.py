@@ -116,7 +116,6 @@ class ServerManager(MessageManager):
             self.validation_over_nodes.clear()
             self.trainer.epoch += 1
             if self.trainer.epoch < self.trainer.args["epochs"]:
-                self.advance_dynamic_quantization_epoch(next_epoch=self.trainer.epoch)
                 for idx in range(1, self.trainer.MAX_RANK + 1):
                     self.send_next_batch_sign(idx)
 

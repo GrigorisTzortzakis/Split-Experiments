@@ -216,6 +216,14 @@ def parse_log_path_metadata(rel_path: str) -> Tuple[Optional[str], str, str]:
         experiment_label = "/".join(path_parts[:-1]) if len(path_parts) > 1 else rel_path
         return method_family, method_variant, experiment_label
 
+    if "reduce_comm_cost" in path_parts and "combined" in path_parts:
+        combined_index = path_parts.index("combined")
+        method_parts = path_parts[combined_index + 2 : -1]
+        method_family = "combined"
+        method_variant = "+".join(part for part in method_parts if part)
+        experiment_label = "/".join(path_parts[:-1]) if len(path_parts) > 1 else rel_path
+        return method_family, method_variant, experiment_label
+
     method_family = path_parts[0] if path_parts else None
     method_variant = "/".join(path_parts[1:-1]) if len(path_parts) > 2 else ""
     experiment_label = "/".join(path_parts[:-1]) if len(path_parts) > 1 else rel_path

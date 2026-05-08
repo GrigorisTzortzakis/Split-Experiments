@@ -104,21 +104,43 @@ def _get_str_arg(args, key: str, default: str) -> str:
         return str(default)
 
 
-def _normalize_dynamic_quantization_mode(raw_value: str) -> str:
-    normalized = str(raw_value or "baseline").strip().lower().replace("_", "-").replace(" ", "-")
-    if normalized in {"dynamic-seperate", "dynamic-separate", "seperate", "separate"}:
-        return "seperate"
-    if normalized in {"dynamic-test-1", "test-1", "test1"}:
-        return "test-1"
-    if normalized in {"dynamic-test-2", "test-2", "test2"}:
-        return "test-2"
-    if normalized in {"dynamic-test-3", "test-3", "test3"}:
-        return "test-3"
-    if normalized in {"dynamic-test-4", "test-4", "test4"}:
-        return "test-4"
-    if normalized in {"dynamic-test-5", "test-5", "test5"}:
-        return "test-5"
-    return "baseline"
+class ComposedCodec:
+    def __init__(self, steps):
+        self.steps = list(steps)
+
+    def _encode_step(self, current, codec):
+        if isinstance(current, torch.Tensor):
+            return codec.encode(current)
+        if isinstance(current, dict) and "q" in current:
+            next_payload = dict(current)
+            next_payload["q"] = self._encode_step(current["q"], codec)
+            return next_payload
+        raise TypeError(f"Cannot apply {type(codec).__name__} to payload type {type(current)!r}")
+
+    def encode(self, x: torch.Tensor):
+        current = x
+        for codec in self.steps:
+            current = self._encode_step(current, codec)
+        return {"codec": "composed", "payload": current}
+
+    def _decode_step(self, current, codec, *, device, dtype):
+        if isinstance(current, dict):
+            try:
+                return codec.decode(current, device=device, dtype=dtype)
+            except Exception:
+                if "q" in current and isinstance(current["q"], dict):
+                    next_payload = dict(current)
+                    next_payload["q"] = self._decode_step(current["q"], codec, device=device, dtype=dtype)
+                    return next_payload
+        return current
+
+    def decode(self, payload, *, device=None, dtype=torch.float32):
+        if not isinstance(payload, dict) or "payload" not in payload:
+            raise TypeError("ComposedCodec.decode expects a dict payload with 'payload'")
+        current = payload["payload"]
+        for codec in reversed(self.steps):
+            current = self._decode_step(current, codec, device=device, dtype=dtype)
+        return current
 
 
 class Message(object):
@@ -614,46 +636,6 @@ class MessageManager(Observer):
         self._tensor_distribution_logged = set()
         total_epochs = _get_float_arg(args, "epochs", 0)
         self._tensor_distribution_samples = self._build_tensor_distribution_samples(int(total_epochs or 0))
-        self._dynamic_quantization = _get_bool_arg(args, "dynamic_quantization", False)
-        raw_dynamic_mode = _get_str_arg(args, "dynamic_quantization_mode", "baseline")
-        self._dynamic_quantization_mode = _normalize_dynamic_quantization_mode(raw_dynamic_mode)
-        self._dynamic_quantization_warmup_epochs = max(0, int(round(_get_float_arg(args, "dynamic_quantization_warmup_epochs", 5.0) or 5.0)))
-        self._dynamic_quantization_baseline_low_scale = float(_get_float_arg(args, "dynamic_quantization_baseline_low_scale", 0.90) or 0.90)
-        self._dynamic_quantization_baseline_high_scale = float(_get_float_arg(args, "dynamic_quantization_baseline_high_scale", 1.00) or 1.00)
-        self._dynamic_quantization_baseline_ema = float(_get_float_arg(args, "dynamic_quantization_baseline_ema", 0.05) or 0.05)
-        self._dynamic_quantization_forward_low_scale = float(
-            _get_float_arg(args, "dynamic_quantization_forward_low_scale", 0.95)
-            or 0.95
-        )
-        self._dynamic_quantization_forward_high_scale = float(
-            _get_float_arg(args, "dynamic_quantization_forward_high_scale", 1.05)
-            or 1.05
-        )
-        self._dynamic_quantization_backward_low_scale = float(
-            _get_float_arg(args, "dynamic_quantization_backward_low_scale", 0.85)
-            or 0.85
-        )
-        self._dynamic_quantization_backward_high_scale = float(
-            _get_float_arg(args, "dynamic_quantization_backward_high_scale", 0.95)
-            or 0.95
-        )
-        self._dynamic_quantization_test3_low_scale = float(
-            _get_float_arg(args, "dynamic_quantization_test3_low_scale", 0.85)
-            or 0.85
-        )
-        self._dynamic_quantization_test3_high_scale = float(
-            _get_float_arg(args, "dynamic_quantization_test3_high_scale", 1.05)
-            or 1.05
-        )
-        self._dynamic_forward_bits_key = "_dynamic_forward_bits"
-        self._dynamic_backward_bits_key = "_dynamic_backward_bits"
-        self._dynamic_epoch_ratio_sum = defaultdict(float)
-        self._dynamic_epoch_ratio_count = defaultdict(int)
-        self._dynamic_epoch_last_seen = {}
-        self._dynamic_baseline_ratio_sum = defaultdict(float)
-        self._dynamic_baseline_ratio_count = defaultdict(int)
-        self._dynamic_baseline_value = {}
-
         # --- Communication compression hooks (forward/backward quantization) ---
         # Backward-compat: `quantize_activations` previously controlled forward-only.
         quantize_acts_legacy = _get_bool_arg(args, "quantize_activations", True)
@@ -664,97 +646,160 @@ class MessageManager(Observer):
         self._quantize_forward = _get_bool_arg(args, "quantize_forward", quantize_acts_legacy)
         self._quantize_backward = _get_bool_arg(args, "quantize_backward", False)
 
-        # Future controller: select codec independently for forward/backward.
-        # Supported right now:
-        # - "dynamic_symmetric_int8" / "int8" -> arithmetic conversion int8
-        # - "dynamic_symmetric_int8_per_channel" / "int8_per_channel" -> arithmetic conversion int8 with per-channel scaling
-        # - global bit width is controlled by args['quantization_bits'] (8 or 4)
-        # - "fixed_scale_int8" (uses <prefix>_truncation_scale or truncation_scale)
-        # - "fp8_e4m3" (arithmetic conversion FP8 E4M3 software codec)
-        # - "uniform_codebook_uint8" -> codeword-based uniform uint8 quantizer
-        # - "mulaw_codebook_uint8" -> mu-law non-uniform codeword quantizer
-        # - "mulaw_per_channel_codebook_uint8" -> per-channel mu-law non-uniform codeword quantizer
-        # - "non_uniform_loyd_codebook_uint8" -> non-uniform Loyd codeword quantizer
-        # - "non_uniform_loyd_per_channel_codebook_uint8" -> per-channel non-uniform Loyd codeword quantizer
-        # - "trunc_noscale_int8" -> truncation-only int8
-        # - "none" (disable for that direction)
-        self._forward_quantization = _get_str_arg(args, "forward_quantization", "dynamic_symmetric_int8").strip().lower()
-        self._backward_quantization = _get_str_arg(args, "backward_quantization", "dynamic_symmetric_int8").strip().lower()
+        self._forward_quantization = _get_str_arg(args, "forward_quantization", "int").strip().lower()
+        self._backward_quantization = _get_str_arg(args, "backward_quantization", "int").strip().lower()
         quantization_bits = int(round(_get_float_arg(args, "quantization_bits", 8.0) or 8.0))
-        if quantization_bits not in (4, 8):
+        if quantization_bits not in (2, 3, 4, 6, 8, 16, 32):
             quantization_bits = 8
+        quantization_granularity = _get_str_arg(args, "quantization_granularity", "per_tensor").strip().lower().replace("-", "_")
+        sparsity_k = _get_float_arg(args, "sparsity_k", None)
+        dimensionality_reduction_ratio = _get_float_arg(args, "dimensionality_reduction_ratio", 0.25)
+
+        def _normalize_sparsity_percent(value: Optional[float], default: int) -> int:
+            if value is None:
+                return int(default)
+            numeric = float(value)
+            if 0.0 < numeric <= 1.0:
+                numeric *= 100.0
+            normalized = int(round(numeric))
+            if normalized not in (1, 5, 10, 25, 50):
+                return int(default)
+            return normalized
+
+        def _normalize_dimensionality_ratio(value: Optional[float], default: float) -> float:
+            if value is None:
+                return float(default)
+            numeric = float(value)
+            if numeric > 1.0:
+                numeric /= 100.0
+            if numeric <= 0.0 or numeric > 1.0:
+                return float(default)
+            return float(numeric)
+        quantization_group_size = int(round(_get_float_arg(args, "quantization_group_size", 32.0) or 32.0))
+        if quantization_group_size <= 0:
+            quantization_group_size = 32
 
         self._fwd_codec = None
         self._bwd_codec = None
-        self._fwd_codec_by_bits: Dict[int, Any] = {}
-        self._bwd_codec_by_bits: Dict[int, Any] = {}
-        self._active_forward_bits = quantization_bits
-        self._active_backward_bits = quantization_bits
         self._probed_forward_epoch: Optional[int] = None
         self._probed_backward_epoch: Optional[int] = None
 
-        def _build_codec(kind: str, *, scale_key_prefix: str, bits_override: Optional[int] = None):
+        def _granularity_for_kind(kind: str) -> str:
+            if kind in (
+                "dynamic_symmetric_int8_per_channel",
+                "dynamic_int8_per_channel",
+                "int8_per_channel",
+                "per_channel_int8",
+                "uniform_per_channel_codebook_uint8",
+                "uniform_per_channel_uint8",
+                "codeword_uniform_per_channel_uint8",
+                "codeword_uniform_per_channel",
+                "uniform_per_channel",
+                "non_uniform_loyd_per_channel_codebook_uint8",
+                "non_uniform_loyd_per_channel_uint8",
+                "codeword_non_uniform_loyd_per_channel",
+                "non_uniform_loyd_per_channel",
+                "loyd_per_channel",
+                "mulaw_per_channel_codebook_uint8",
+                "mulaw_per_channel_uint8",
+                "codeword_mulaw_per_channel",
+                "non_uniform_mlaw_per_channel",
+                "mu_law_per_channel",
+                "mlaw_per_channel",
+            ):
+                return "per_channel"
+            return quantization_granularity
+
+        def _build_single_codec(kind: str, *, scale_key_prefix: str, bits_override: Optional[int] = None):
             if kind in ("none", "off", "false", "0"):
                 return None
             codec_bits = quantization_bits if bits_override is None else int(bits_override)
+            codec_granularity = _granularity_for_kind(kind)
             # Keep imports local so MPI can still run if compression module is absent.
             from compression.quantization.arithmetic_conversion import (
-                PerChannelInt8Codec,
-                TruncationFloat8Codec as ArithmeticFloat8Codec,
-                TruncationInt8Codec as ArithmeticInt8Codec,
+                IntCodec,
+                TruncationFloatCodec as ArithmeticFloatCodec,
             )
+            from compression.dimensionality_reduction import (
+                AutoencoderCodec,
+                LowRankPCAProjectionCodec,
+            )
+            from compression.sparsity import RandomTopKSparsityCodec, TopKSparsityCodec
             from compression.quantization.codeword import (
                 LloydMaxCodebookUInt8Codec,
-                MuLawCodebookUInt8Codec,
-                MuLawPerChannelCodebookUInt8Codec,
-                NonUniformLoydCodebookUInt8Codec,
-                NonUniformLoydPerChannelCodebookUInt8Codec,
-                UniformCodebookUInt8Codec,
-                UniformPerChannelCodebookUInt8Codec,
+                MuLawCodebookCodec,
+                NonUniformLoydCodebookCodec,
+                UniformCodebookCodec,
             )
-            from compression.quantization.Truncation import TruncationInt8Codec as TruncationInt8Codec
+            from compression.quantization.Truncation import TruncationIntCodec
 
-            if kind in ("dynamic_symmetric_int8", "dynamic_int8", "int8"):
-                return ArithmeticInt8Codec(num_bits=codec_bits)
+            if kind in ("dynamic_symmetric_int8", "dynamic_int8", "int8", "int"):
+                return IntCodec(num_bits=codec_bits, granularity=codec_granularity, group_size=quantization_group_size)
+            if kind == "autoencoder":
+                return AutoencoderCodec(
+                    reduction_ratio=_normalize_dimensionality_ratio(dimensionality_reduction_ratio, 0.25),
+                    storage_bits=max(8, codec_bits),
+                )
+            if kind in ("low_rank_pca", "low_rank_projection", "pca_projection", "pca", "low_rank"):
+                return LowRankPCAProjectionCodec(
+                    reduction_ratio=_normalize_dimensionality_ratio(dimensionality_reduction_ratio, 0.25),
+                    storage_bits=max(8, codec_bits),
+                )
+            if kind in ("top_k", "topk", "top_k_sparsity"):
+                return TopKSparsityCodec(k_percent=_normalize_sparsity_percent(sparsity_k, 1), storage_bits=max(8, codec_bits))
+            if kind in ("random_top_k", "random_topk", "random_top_k_sparsity"):
+                return RandomTopKSparsityCodec(k_percent=_normalize_sparsity_percent(sparsity_k, 5), storage_bits=max(8, codec_bits))
             if kind in ("dynamic_symmetric_int8_per_channel", "dynamic_int8_per_channel", "int8_per_channel", "per_channel_int8"):
-                return PerChannelInt8Codec(num_bits=codec_bits)
+                return IntCodec(num_bits=codec_bits, granularity="per_channel", group_size=quantization_group_size)
             if kind in ("fixed_scale_int8", "fixed_int8"):
                 fixed_scale = _get_float_arg(self.args, f"{scale_key_prefix}_truncation_scale", None)
                 if fixed_scale is None:
                     fixed_scale = _get_float_arg(self.args, "truncation_scale", None)
-                return ArithmeticInt8Codec(fixed_scale=fixed_scale, num_bits=codec_bits)
-            if kind in ("fp8_e4m3", "float8_e4m3", "e4m3", "float8"):
-                return ArithmeticFloat8Codec(layout=("e2m1" if codec_bits == 4 else "e4m3"))
+                return IntCodec(
+                    fixed_scale=fixed_scale,
+                    num_bits=codec_bits,
+                    granularity=codec_granularity,
+                    group_size=quantization_group_size,
+                )
+            if kind in ("fp8_e4m3", "float8_e4m3", "e4m3", "float8", "float"):
+                return ArithmeticFloatCodec(layout=("e2m1" if codec_bits == 4 else "e4m3"))
             if kind in ("uniform_codebook_uint8", "uniform_codeword_uint8", "codeword_uniform_uint8", "codeword_uniform", "uniform"):
-                return UniformCodebookUInt8Codec(num_bits=codec_bits)
+                return UniformCodebookCodec(num_bits=codec_bits, granularity=codec_granularity, group_size=quantization_group_size)
             if kind in ("uniform_per_channel_codebook_uint8", "uniform_per_channel_uint8", "codeword_uniform_per_channel_uint8", "codeword_uniform_per_channel", "uniform_per_channel"):
-                return UniformPerChannelCodebookUInt8Codec(num_bits=codec_bits)
+                return UniformCodebookCodec(num_bits=codec_bits, granularity="per_channel", group_size=quantization_group_size)
             if kind in ("non_uniform_loyd_codebook_uint8", "non_uniform_loyd_uint8", "codeword_non_uniform_loyd", "non_uniform_loyd"):
-                return NonUniformLoydCodebookUInt8Codec(num_bits=codec_bits)
+                return NonUniformLoydCodebookCodec(num_bits=codec_bits, granularity=codec_granularity, group_size=quantization_group_size)
             if kind in ("non_uniform_loyd_per_channel_codebook_uint8", "non_uniform_loyd_per_channel_uint8", "codeword_non_uniform_loyd_per_channel", "non_uniform_loyd_per_channel", "loyd_per_channel"):
-                return NonUniformLoydPerChannelCodebookUInt8Codec(num_bits=codec_bits)
+                return NonUniformLoydCodebookCodec(num_bits=codec_bits, granularity="per_channel", group_size=quantization_group_size)
             if kind in ("mulaw_codebook_uint8", "mulaw_non_uniform_uint8", "codeword_non_uniform", "codeword_mulaw", "non_uniform_mlaw"):
-                return MuLawCodebookUInt8Codec(num_bits=codec_bits)
+                return MuLawCodebookCodec(num_bits=codec_bits, granularity=codec_granularity, group_size=quantization_group_size)
             if kind in ("mulaw_per_channel_codebook_uint8", "mulaw_per_channel_uint8", "codeword_mulaw_per_channel", "non_uniform_mlaw_per_channel", "mu_law_per_channel", "mlaw_per_channel"):
-                return MuLawPerChannelCodebookUInt8Codec(num_bits=codec_bits)
+                return MuLawCodebookCodec(num_bits=codec_bits, granularity="per_channel", group_size=quantization_group_size)
             if kind in ("lloyd_max_codebook_uint8", "lloyd_max_uint8", "codeword_lloyd_max", "non_uniform_lloyd_uint8", "lloyd_max"):
                 return LloydMaxCodebookUInt8Codec(num_bits=codec_bits)
-            if kind in ("trunc_noscale_int8", "trunc_bits_int8", "trunc_scale_int8", "truncation_int8"):
-                return TruncationInt8Codec(num_bits=codec_bits)
+            if kind in ("trunc_noscale_int", "trunc_noscale_int8", "trunc_bits_int8", "trunc_scale_int8", "truncation_int", "truncation_int8"):
+                return TruncationIntCodec(num_bits=codec_bits, granularity=codec_granularity, group_size=quantization_group_size)
             raise ValueError(f"Unsupported quantization kind: {kind!r}")
+
+        def _build_codec(kind: str, *, scale_key_prefix: str, bits_override: Optional[int] = None):
+            parts = [part.strip() for part in str(kind or "").strip().lower().split("+") if part.strip()]
+            if not parts:
+                return None
+            if len(parts) == 1:
+                return _build_single_codec(parts[0], scale_key_prefix=scale_key_prefix, bits_override=bits_override)
+            return ComposedCodec([
+                _build_single_codec(part, scale_key_prefix=scale_key_prefix, bits_override=bits_override)
+                for part in parts
+            ])
 
 
         try:
             if self._quantize_forward:
-                self._fwd_codec_by_bits[8] = _build_codec(self._forward_quantization, scale_key_prefix="forward", bits_override=8)
-                self._fwd_codec_by_bits[4] = _build_codec(self._forward_quantization, scale_key_prefix="forward", bits_override=4)
-                self._fwd_codec = self._fwd_codec_by_bits.get(self._active_forward_bits)
+                self._fwd_codec = _build_codec(self._forward_quantization, scale_key_prefix="forward", bits_override=quantization_bits)
                 if self._fwd_codec is None:
                     raise ValueError("Forward quantization was requested but no forward codec was created.")
             if self._quantize_backward:
-                self._bwd_codec_by_bits[8] = _build_codec(self._backward_quantization, scale_key_prefix="backward", bits_override=8)
-                self._bwd_codec_by_bits[4] = _build_codec(self._backward_quantization, scale_key_prefix="backward", bits_override=4)
-                self._bwd_codec = self._bwd_codec_by_bits.get(self._active_backward_bits)
+                self._bwd_codec = _build_codec(self._backward_quantization, scale_key_prefix="backward", bits_override=quantization_bits)
                 if self._bwd_codec is None:
                     raise ValueError("Backward quantization was requested but no backward codec was created.")
         except Exception as exc:
@@ -766,24 +811,12 @@ class MessageManager(Observer):
             ) from exc
 
         logging.info(
-            "Quantization initialized: forward_enabled=%s forward_codec=%s backward_enabled=%s backward_codec=%s bits=%s dynamic=%s dynamic_mode=%s baseline_low_scale=%s baseline_high_scale=%s forward_low_scale=%s forward_high_scale=%s backward_low_scale=%s backward_high_scale=%s moving_baseline_ema=%s test3_low_scale=%s test3_high_scale=%s warmup_epochs=%s",
+            "Quantization initialized: forward_enabled=%s forward_codec=%s backward_enabled=%s backward_codec=%s bits=%s",
             self._quantize_forward,
             (type(self._fwd_codec).__name__ if self._fwd_codec is not None else None),
             self._quantize_backward,
             (type(self._bwd_codec).__name__ if self._bwd_codec is not None else None),
             quantization_bits,
-            self._dynamic_quantization,
-            self._dynamic_quantization_mode,
-            self._dynamic_quantization_baseline_low_scale,
-            self._dynamic_quantization_baseline_high_scale,
-            self._dynamic_quantization_forward_low_scale,
-            self._dynamic_quantization_forward_high_scale,
-            self._dynamic_quantization_backward_low_scale,
-            self._dynamic_quantization_backward_high_scale,
-            self._dynamic_quantization_baseline_ema,
-            self._dynamic_quantization_test3_low_scale,
-            self._dynamic_quantization_test3_high_scale,
-            self._dynamic_quantization_warmup_epochs,
         )
 
         self.com_manager = MpiCommunicationManager(comm, rank, size, node_type=node_type)
@@ -818,328 +851,6 @@ class MessageManager(Observer):
                 pass
         if not self._tensor_distribution_logging:
             return
-
-    def _dynamic_reference_tensor(self, tensor_obj):
-        if isinstance(tensor_obj, tuple) and tensor_obj:
-            return tensor_obj[0]
-        if isinstance(tensor_obj, list) and tensor_obj:
-            return tensor_obj[0]
-        return tensor_obj
-
-    def _is_dynamic_decision_server(self) -> bool:
-        try:
-            server_rank = int(self.args["server_rank"])
-        except Exception:
-            server_rank = 0
-        return self.node_type == "server" and int(self.rank) == server_rank
-
-    def _dynamic_is_warmup_epoch(self, epoch: int) -> bool:
-        return int(epoch) < int(self._dynamic_quantization_warmup_epochs)
-
-    def _observe_dynamic_epoch_tensor(self, params: dict, tensor_key: str) -> None:
-        if not self._dynamic_quantization or not self._is_dynamic_decision_server():
-            return
-        phase = str(params.get("_tensor_dist_phase", "")).strip().lower()
-        if phase != "train":
-            return
-        try:
-            epoch = int(params.get("_tensor_dist_epoch"))
-        except Exception:
-            return
-        reference_tensor = self._dynamic_reference_tensor(params.get(tensor_key))
-        if not isinstance(reference_tensor, torch.Tensor):
-            return
-        stat_key = "forward" if tensor_key == "activations" else "backward"
-        score = self._compute_dynamic_score(stat_key, reference_tensor, epoch=epoch)
-        if score is None:
-            return
-        self._dynamic_epoch_ratio_sum[stat_key] += score
-        self._dynamic_epoch_ratio_count[stat_key] += 1
-        self._dynamic_epoch_last_seen[stat_key] = epoch
-
-    def _dynamic_baseline_mean(self, direction: str) -> Optional[float]:
-        cached_baseline = self._dynamic_baseline_value.get(direction)
-        if cached_baseline is not None:
-            return float(cached_baseline)
-        baseline_count = int(self._dynamic_baseline_ratio_count.get(direction, 0))
-        if baseline_count <= 0:
-            return None
-        baseline_value = float(self._dynamic_baseline_ratio_sum.get(direction, 0.0)) / float(baseline_count)
-        self._dynamic_baseline_value[direction] = baseline_value
-        return baseline_value
-
-    def _dynamic_uses_moving_baseline(self) -> bool:
-        return self._dynamic_quantization_mode in {"test-1", "test-4", "test-5"}
-
-    def _dynamic_uses_composite_score(self) -> bool:
-        return self._dynamic_quantization_mode in {"test-2", "test-5"}
-
-    def _dynamic_uses_hysteresis_test(self) -> bool:
-        return self._dynamic_quantization_mode in {"test-3", "test-4", "test-5"}
-
-    def _dynamic_direction_scales(self, direction: str) -> Tuple[float, float]:
-        if self._dynamic_uses_hysteresis_test():
-            return (
-                self._dynamic_quantization_test3_low_scale,
-                self._dynamic_quantization_test3_high_scale,
-            )
-        if self._dynamic_quantization_mode != "seperate":
-            return (
-                self._dynamic_quantization_baseline_low_scale,
-                self._dynamic_quantization_baseline_high_scale,
-            )
-        if direction == "forward":
-            return (
-                self._dynamic_quantization_forward_low_scale,
-                self._dynamic_quantization_forward_high_scale,
-            )
-        return (
-            self._dynamic_quantization_backward_low_scale,
-            self._dynamic_quantization_backward_high_scale,
-        )
-
-    def _record_dynamic_warmup_score(self, direction: str, avg_score: float) -> float:
-        self._dynamic_baseline_ratio_sum[direction] += avg_score
-        self._dynamic_baseline_ratio_count[direction] += 1
-        baseline_value = float(self._dynamic_baseline_ratio_sum[direction]) / float(self._dynamic_baseline_ratio_count[direction])
-        self._dynamic_baseline_value[direction] = baseline_value
-        return baseline_value
-
-    def _update_dynamic_moving_baseline(self, direction: str, avg_score: Optional[float]) -> Optional[float]:
-        if avg_score is None or not self._dynamic_uses_moving_baseline():
-            return self._dynamic_baseline_mean(direction)
-        baseline_value = self._dynamic_baseline_mean(direction)
-        if baseline_value is None:
-            self._dynamic_baseline_value[direction] = float(avg_score)
-            return float(avg_score)
-        updated_baseline = ((1.0 - self._dynamic_quantization_baseline_ema) * baseline_value) + (
-            self._dynamic_quantization_baseline_ema * float(avg_score)
-        )
-        self._dynamic_baseline_value[direction] = float(updated_baseline)
-        return float(updated_baseline)
-
-    def _get_dynamic_epoch_score(self, direction: str) -> Tuple[Optional[float], Optional[float]]:
-        score_sum = float(self._dynamic_epoch_ratio_sum.get(direction, 0.0))
-        score_count = int(self._dynamic_epoch_ratio_count.get(direction, 0))
-        if score_count <= 0:
-            return None, self._dynamic_baseline_mean(direction)
-        avg_score = score_sum / float(score_count)
-        return avg_score, self._dynamic_baseline_mean(direction)
-
-    def _dynamic_channel_scale_score(self, summary: Dict[str, Any]) -> float:
-        return float(math.log1p(float(summary.get("max_channel_scale_over_min_channel_scale", 0.0) or 0.0)))
-
-    def _compute_dynamic_composite_score(self, summary: Dict[str, Any]) -> float:
-        return float(
-            float(summary.get("outlier_score", 0.0) or 0.0)
-            + float(summary.get("spread_score", 0.0) or 0.0)
-            + self._dynamic_channel_scale_score(summary)
-        )
-
-    def _compute_dynamic_score(self, direction: str, tensor: torch.Tensor, *, epoch: Optional[int] = None) -> Optional[float]:
-        if self._dynamic_uses_composite_score():
-            summary = self._summarize_tensor_distribution(tensor)
-            if not isinstance(summary, dict):
-                return None
-            return self._compute_dynamic_composite_score(summary)
-        return self._compute_dynamic_tail_ratio(tensor)
-
-    def _decide_dynamic_bits(self, *, direction: str, current_bits: int, next_epoch: int) -> Tuple[int, Optional[float], Optional[float]]:
-        avg_score, baseline_mean = self._get_dynamic_epoch_score(direction)
-        if avg_score is None:
-            return current_bits, None, baseline_mean
-        if next_epoch <= self._dynamic_quantization_warmup_epochs:
-            baseline_mean = self._record_dynamic_warmup_score(direction, avg_score)
-            return 8, avg_score, baseline_mean
-        if baseline_mean is None:
-            return current_bits, avg_score, None
-        low_scale, high_scale = self._dynamic_direction_scales(direction)
-        if avg_score < (low_scale * baseline_mean):
-            next_bits = 4
-        elif avg_score > (high_scale * baseline_mean):
-            next_bits = 8
-        else:
-            next_bits = current_bits
-        self._update_dynamic_moving_baseline(direction, avg_score)
-        return next_bits, avg_score, baseline_mean
-
-    def _decide_dynamic_shared_bits(
-        self,
-        *,
-        next_epoch: int,
-        current_forward_bits: int,
-        current_backward_bits: int,
-    ) -> Tuple[int, Optional[float], Optional[float], Optional[float], Optional[float]]:
-        avg_forward_score, forward_baseline = self._get_dynamic_epoch_score("forward")
-        avg_backward_score, backward_baseline = self._get_dynamic_epoch_score("backward")
-
-        available_ratios = [
-            score for score in (avg_forward_score, avg_backward_score) if score is not None
-        ]
-        available_baselines = [
-            baseline for baseline in (forward_baseline, backward_baseline) if baseline is not None
-        ]
-
-        if not available_ratios:
-            shared_current_bits = current_forward_bits if current_forward_bits == current_backward_bits else 8
-            shared_baseline = (
-                sum(available_baselines) / float(len(available_baselines))
-                if available_baselines
-                else None
-            )
-            return shared_current_bits, None, shared_baseline, avg_forward_score, avg_backward_score
-
-        shared_ratio = sum(available_ratios) / float(len(available_ratios))
-        shared_baseline = (
-            sum(available_baselines) / float(len(available_baselines))
-            if available_baselines
-            else None
-        )
-
-        if next_epoch <= self._dynamic_quantization_warmup_epochs:
-            if avg_forward_score is not None:
-                forward_baseline = self._record_dynamic_warmup_score("forward", avg_forward_score)
-            if avg_backward_score is not None:
-                backward_baseline = self._record_dynamic_warmup_score("backward", avg_backward_score)
-            shared_baseline = (
-                sum(
-                    baseline
-                    for baseline in (forward_baseline, backward_baseline)
-                    if baseline is not None
-                )
-                / float(
-                    len([baseline for baseline in (forward_baseline, backward_baseline) if baseline is not None])
-                )
-            ) if any(baseline is not None for baseline in (forward_baseline, backward_baseline)) else None
-            return 8, shared_ratio, shared_baseline, avg_forward_score, avg_backward_score
-        if shared_baseline is None:
-            shared_current_bits = current_forward_bits if current_forward_bits == current_backward_bits else 8
-            return shared_current_bits, shared_ratio, None, avg_forward_score, avg_backward_score
-        low_scale, high_scale = self._dynamic_direction_scales("forward")
-        if shared_ratio < (low_scale * shared_baseline):
-            shared_bits = 4
-        elif shared_ratio > (high_scale * shared_baseline):
-            shared_bits = 8
-        else:
-            shared_bits = current_forward_bits if current_forward_bits == current_backward_bits else 8
-        if avg_forward_score is not None:
-            self._update_dynamic_moving_baseline("forward", avg_forward_score)
-        if avg_backward_score is not None:
-            self._update_dynamic_moving_baseline("backward", avg_backward_score)
-        return shared_bits, shared_ratio, shared_baseline, avg_forward_score, avg_backward_score
-
-    def advance_dynamic_quantization_epoch(self, *, next_epoch: int) -> None:
-        if not self._dynamic_quantization or not self._is_dynamic_decision_server():
-            return
-        if self._dynamic_quantization_mode == "seperate":
-            next_forward_bits, avg_forward_score, forward_baseline = self._decide_dynamic_bits(
-                direction="forward",
-                current_bits=self._active_forward_bits,
-                next_epoch=next_epoch,
-            )
-            next_backward_bits, avg_backward_score, backward_baseline = self._decide_dynamic_bits(
-                direction="backward",
-                current_bits=self._active_backward_bits,
-                next_epoch=next_epoch,
-            )
-            logging.info(
-                "Dynamic quantization epoch decision rank=%s next_epoch=%s mode=%s forward_score=%s forward_baseline=%s backward_score=%s backward_baseline=%s old_forward_bits=%s new_forward_bits=%s old_backward_bits=%s new_backward_bits=%s forward_low_scale=%s forward_high_scale=%s backward_low_scale=%s backward_high_scale=%s",
-                self.rank,
-                next_epoch,
-                self._dynamic_quantization_mode,
-                ("n/a" if avg_forward_score is None else format(avg_forward_score, ".6g")),
-                ("n/a" if forward_baseline is None else format(forward_baseline, ".6g")),
-                ("n/a" if avg_backward_score is None else format(avg_backward_score, ".6g")),
-                ("n/a" if backward_baseline is None else format(backward_baseline, ".6g")),
-                self._active_forward_bits,
-                next_forward_bits,
-                self._active_backward_bits,
-                next_backward_bits,
-                self._dynamic_quantization_forward_low_scale,
-                self._dynamic_quantization_forward_high_scale,
-                self._dynamic_quantization_backward_low_scale,
-                self._dynamic_quantization_backward_high_scale,
-            )
-        else:
-            shared_bits, shared_score, shared_baseline, avg_forward_score, avg_backward_score = self._decide_dynamic_shared_bits(
-                next_epoch=next_epoch,
-                current_forward_bits=self._active_forward_bits,
-                current_backward_bits=self._active_backward_bits,
-            )
-            next_forward_bits = shared_bits
-            next_backward_bits = shared_bits
-            forward_baseline = self._dynamic_baseline_mean("forward")
-            backward_baseline = self._dynamic_baseline_mean("backward")
-            logging.info(
-                "Dynamic quantization epoch decision rank=%s next_epoch=%s mode=%s shared_score=%s shared_baseline=%s forward_score=%s forward_baseline=%s backward_score=%s backward_baseline=%s old_forward_bits=%s new_forward_bits=%s old_backward_bits=%s new_backward_bits=%s low_scale=%s high_scale=%s",
-                self.rank,
-                next_epoch,
-                self._dynamic_quantization_mode,
-                ("n/a" if shared_score is None else format(shared_score, ".6g")),
-                ("n/a" if shared_baseline is None else format(shared_baseline, ".6g")),
-                ("n/a" if avg_forward_score is None else format(avg_forward_score, ".6g")),
-                ("n/a" if forward_baseline is None else format(forward_baseline, ".6g")),
-                ("n/a" if avg_backward_score is None else format(avg_backward_score, ".6g")),
-                ("n/a" if backward_baseline is None else format(backward_baseline, ".6g")),
-                self._active_forward_bits,
-                next_forward_bits,
-                self._active_backward_bits,
-                next_backward_bits,
-                self._dynamic_quantization_baseline_low_scale,
-                self._dynamic_quantization_baseline_high_scale,
-            )
-        self._active_forward_bits = next_forward_bits
-        self._active_backward_bits = next_backward_bits
-        self._fwd_codec = self._fwd_codec_by_bits.get(self._active_forward_bits)
-        self._bwd_codec = self._bwd_codec_by_bits.get(self._active_backward_bits)
-        self._dynamic_epoch_ratio_sum = defaultdict(float)
-        self._dynamic_epoch_ratio_count = defaultdict(int)
-        self._dynamic_epoch_last_seen = {}
-
-    def advance_dynamic_quantization_for_trainer(self, trainer) -> None:
-        if trainer is None:
-            return
-        try:
-            next_epoch = int(getattr(trainer, "epoch"))
-        except Exception:
-            return
-        self.advance_dynamic_quantization_epoch(next_epoch=next_epoch)
-
-    def _attach_dynamic_quantization_control(self, message) -> None:
-        if not self._dynamic_quantization or not self._is_dynamic_decision_server():
-            return
-        try:
-            params = message.get_params() if hasattr(message, "get_params") else None
-        except Exception:
-            params = None
-        if not isinstance(params, dict):
-            return
-        message.add_params(self._dynamic_forward_bits_key, int(self._active_forward_bits))
-        message.add_params(self._dynamic_backward_bits_key, int(self._active_backward_bits))
-
-    def _apply_dynamic_quantization_control(self, msg_params) -> None:
-        if not self._dynamic_quantization:
-            return
-        try:
-            params = msg_params.get_params() if hasattr(msg_params, "get_params") else None
-        except Exception:
-            params = None
-        if not isinstance(params, dict):
-            return
-        forward_bits = params.get(self._dynamic_forward_bits_key)
-        backward_bits = params.get(self._dynamic_backward_bits_key)
-        try:
-            if int(forward_bits) in (4, 8):
-                self._active_forward_bits = int(forward_bits)
-                self._fwd_codec = self._fwd_codec_by_bits.get(self._active_forward_bits)
-        except Exception:
-            pass
-        try:
-            if int(backward_bits) in (4, 8):
-                self._active_backward_bits = int(backward_bits)
-                self._bwd_codec = self._bwd_codec_by_bits.get(self._active_backward_bits)
-        except Exception:
-            pass
 
     def _collect_logged_tensors(self, obj, prefix: str):
         items = []
@@ -1224,11 +935,12 @@ class MessageManager(Observer):
             return raw_bytes, quantized_bytes, metadata_bytes
         if isinstance(obj, dict):
             if self._is_quant_payload(obj):
-                quantized_bytes = self._estimate_nbytes(obj.get("q"))
+                payload_key = "payload" if obj.get("codec") == "composed" else "q"
+                quantized_bytes = self._estimate_nbytes(obj.get(payload_key))
                 metadata_bytes = sum(
                     self._estimate_nbytes(key) + self._estimate_nbytes(value)
                     for key, value in obj.items()
-                    if key != "q"
+                    if key != payload_key
                 )
                 return 0, quantized_bytes, metadata_bytes
             for value in obj.values():
@@ -1335,22 +1047,6 @@ class MessageManager(Observer):
         if value < high_cutoff:
             return "medium"
         return "high"
-
-    def _compute_dynamic_tail_ratio(self, tensor: torch.Tensor) -> Optional[float]:
-        try:
-            with torch.no_grad():
-                flat = tensor.detach()
-                if not flat.dtype.is_floating_point:
-                    flat = flat.float()
-                flat = flat.reshape(-1).to(dtype=torch.float32)
-                if flat.numel() == 0:
-                    return None
-                flat_abs = flat.abs()
-                p95_abs = float(torch.quantile(flat_abs, 0.95).item())
-                p99_abs = float(torch.quantile(flat_abs, 0.99).item())
-                return p99_abs / (p95_abs + 1e-12)
-        except Exception:
-            return None
 
     def _summarize_tensor_distribution(self, tensor: torch.Tensor):
         try:
@@ -1496,21 +1192,38 @@ class MessageManager(Observer):
         # Prefer explicit codec marker, but also accept minimal required keys.
         if obj.get("codec") in (
             "fp8_e4m3",
+            "fp4_e2m1",
+            "dynamic_symmetric_int",
             "dynamic_symmetric_int8",
             "dynamic_symmetric_int8_per_channel",
+            "uniform_codebook",
             "uniform_codebook_uint8",
             "uniform_per_channel_codebook_uint8",
+            "non_uniform_loyd_codebook",
             "non_uniform_loyd_codebook_uint8",
+            "mulaw_codebook",
             "mulaw_codebook_uint8",
             "non_uniform_loyd_per_channel_codebook_uint8",
             "mulaw_per_channel_codebook_uint8",
             "lloyd_max_codebook_uint8",
+            "trunc_noscale_int",
             "trunc_noscale_int8",
             "trunc_bits_int8",
             "trunc_scale_int8",
             "minmax_affine_uint8",
             "uniform_asymmetric_uint8",
+            "top_k_sparsity",
+            "random_top_k_sparsity",
+            "autoencoder",
+            "low_rank_pca_projection",
+            "composed",
         ):
+            return True
+        if obj.get("codec") == "composed" and "payload" in obj:
+            return True
+        if "q" in obj and "shape" in obj and "indices" in obj:
+            return True
+        if "q" in obj and "shape" in obj and ("basis" in obj or "mean" in obj or "block_size" in obj):
             return True
         if "q" in obj and "shape" in obj and ("scale" in obj or "codebook" in obj or "layout" in obj):
             return True
@@ -1648,7 +1361,6 @@ class MessageManager(Observer):
             )
         # Backward-path gradients
         if "activation_grads" in params:
-            self._observe_dynamic_epoch_tensor(params, "activation_grads")
             raw_bytes, _, _ = self._summarize_tensor_payload_bytes(params["activation_grads"], preserve_second_if_pair=False)
             quant_time = 0.0
             if self._quantize_backward and self._bwd_codec is not None:
@@ -1756,17 +1468,8 @@ class MessageManager(Observer):
         except Exception:
             pass
 
-        self._apply_dynamic_quantization_control(msg_params)
-
         # Decode activations after comm accounting, before dispatch to algorithm handlers.
         self._maybe_dequantize_message(msg_params)
-
-        try:
-            params = msg_params.get_params() if hasattr(msg_params, "get_params") else None
-        except Exception:
-            params = None
-        if isinstance(params, dict) and "activations" in params:
-            self._observe_dynamic_epoch_tensor(params, "activations")
 
         handler = self._message_handlers.get(msg_type)
         if handler is None:
@@ -1775,7 +1478,6 @@ class MessageManager(Observer):
         handler(msg_params)
 
     def send_message(self, message, priority: Optional[int] = None):
-        self._attach_dynamic_quantization_control(message)
         self._maybe_log_tensor_distribution(message)
 
         # Quantize activations before accounting and enqueueing for send.
