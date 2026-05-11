@@ -192,8 +192,8 @@ def _args_quantization_tags(args) -> Dict[str, str]:
     forward_parts = [part.strip() for part in forward_method.split("+") if part.strip()]
     backward_parts = [part.strip() for part in backward_method.split("+") if part.strip()]
     has_combined = len(forward_parts) > 1 or len(backward_parts) > 1
-    sparse_methods = {"top_k", "topk", "top_k_sparsity", "random_top_k", "random_topk", "random_top_k_sparsity"}
-    dimensionality_methods = {"autoencoder", "low_rank_pca", "low_rank_projection", "pca_projection", "pca", "low_rank"}
+    sparse_methods = {"top_k", "topk", "top_k_sparsity", "random_top_k", "random_topk", "random_top_k_sparsity", "paper_top_k", "paper_topk", "paper_top_k_sparsity"}
+    dimensionality_methods = {"random_projection", "autoencoder", "low_rank_pca", "low_rank_projection", "pca_projection", "pca", "low_rank"}
     all_methods = set(forward_parts + backward_parts)
     if has_combined:
         profile = f"{int(args.get('quantization_bits') or 8)}bit"
@@ -201,14 +201,14 @@ def _args_quantization_tags(args) -> Dict[str, str]:
     elif forward_method in sparse_methods or backward_method in sparse_methods:
         try:
             sparsity_value = float(args.get("sparsity_k") or 1)
-            if 0.0 < sparsity_value <= 1.0:
+            if 0.0 < sparsity_value < 1.0:
                 sparsity_value *= 100.0
             profile = f"{int(round(sparsity_value))}pct"
         except Exception:
             profile = "1pct"
         family = "sparsity"
     elif forward_method in dimensionality_methods or backward_method in dimensionality_methods:
-        if forward_method in {"autoencoder", "low_rank_pca", "low_rank_projection", "pca_projection", "pca", "low_rank"} or backward_method in {"autoencoder", "low_rank_pca", "low_rank_projection", "pca_projection", "pca", "low_rank"}:
+        if forward_method in {"random_projection", "autoencoder", "low_rank_pca", "low_rank_projection", "pca_projection", "pca", "low_rank"} or backward_method in {"random_projection", "autoencoder", "low_rank_pca", "low_rank_projection", "pca_projection", "pca", "low_rank"}:
             try:
                 reduction_ratio = float(args.get("dimensionality_reduction_ratio") or 0.25)
                 if reduction_ratio > 1.0:

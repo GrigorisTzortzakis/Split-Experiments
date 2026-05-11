@@ -18,12 +18,26 @@ def _storage_dtype(storage_bits: int) -> torch.dtype:
 
 def _normalize_k_percent(k_percent: float | int) -> int:
     value = float(k_percent)
-    if 0.0 < value <= 1.0:
+    if 0.0 < value < 1.0:
         value *= 100.0
     normalized = int(round(value))
     if normalized not in SUPPORTED_K_PERCENTS:
         raise ValueError(f"k_percent must be one of {SUPPORTED_K_PERCENTS}")
     return normalized
+
+
+def _index_storage_dtype(numel: int) -> torch.dtype:
+    if numel <= 0x100:
+        return torch.uint8
+    if numel <= 0x10000:
+        return torch.uint16
+    if numel <= 0x7FFFFFFF:
+        return torch.int32
+    return torch.int64
+
+
+def _store_indices(indices: torch.Tensor, *, numel: int) -> torch.Tensor:
+    return indices.to(dtype=_index_storage_dtype(numel))
 
 
 @dataclass(frozen=True)
@@ -45,12 +59,12 @@ class TopKSparsityCodec:
         flat = x_cpu.reshape(-1)
         keep_count = self._keep_count(int(flat.numel()))
         if keep_count == 0:
-            indices = torch.empty(0, dtype=torch.int64)
+            indices = torch.empty(0, dtype=_index_storage_dtype(int(flat.numel())))
             values = flat.new_empty((0,))
         else:
-            _, indices = torch.topk(flat.abs(), k=keep_count, largest=True, sorted=False)
-            indices = indices.to(dtype=torch.int64)
-            values = flat.index_select(0, indices).to(dtype=_storage_dtype(self.storage_bits))
+            _, selected_indices = torch.topk(flat.abs(), k=keep_count, largest=True, sorted=False)
+            values = flat.index_select(0, selected_indices).to(dtype=_storage_dtype(self.storage_bits))
+            indices = _store_indices(selected_indices, numel=int(flat.numel()))
 
         return {
             "codec": "top_k_sparsity",
@@ -77,8 +91,13 @@ class TopKSparsityCodec:
         shape = tuple(int(dim) for dim in payload["shape"])
         if not isinstance(values, torch.Tensor):
             raise TypeError("payload['q'] must be a torch.Tensor")
-        if not isinstance(indices, torch.Tensor) or indices.dtype != torch.int64:
-            raise TypeError("payload['indices'] must be a torch.int64 Tensor")
+        if not isinstance(indices, torch.Tensor) or indices.dtype not in (
+            torch.uint8,
+            torch.uint16,
+            torch.int32,
+            torch.int64,
+        ):
+            raise TypeError("payload['indices'] must be an integral Tensor")
 
         target_device = device if device is not None else "cpu"
         out = torch.zeros(shape, dtype=dtype, device=target_device)
@@ -86,5 +105,5 @@ class TopKSparsityCodec:
             return out
 
         flat = out.reshape(-1)
-        flat.index_copy_(0, indices.to(device=target_device), values.to(device=target_device, dtype=dtype))
+        flat.index_copy_(0, indices.to(device=target_device, dtype=torch.int64), values.to(device=target_device, dtype=dtype))
         return out

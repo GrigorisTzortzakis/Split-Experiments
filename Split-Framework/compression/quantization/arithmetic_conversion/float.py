@@ -8,6 +8,49 @@ import torch
 Payload = Dict[str, Any]
 
 
+def _pack_unsigned_values(values: torch.Tensor, *, num_bits: int) -> tuple[torch.Tensor, int]:
+    flat = values.reshape(-1).to(dtype=torch.int64, device="cpu")
+    if num_bits >= 8:
+        return flat.to(dtype=torch.uint8), int(flat.numel())
+
+    num_values = int(flat.numel())
+    total_bits = num_values * int(num_bits)
+    packed = torch.zeros((max(1, (total_bits + 7) // 8),), dtype=torch.int64)
+    bit_offsets = torch.arange(num_values, dtype=torch.int64) * int(num_bits)
+    byte_indices = torch.div(bit_offsets, 8, rounding_mode="floor")
+    bit_positions = torch.remainder(bit_offsets, 8)
+    packed.index_add_(0, byte_indices, torch.bitwise_left_shift(flat, bit_positions))
+
+    spill_mask = bit_positions + int(num_bits) > 8
+    if torch.any(spill_mask):
+        spill_indices = byte_indices[spill_mask] + 1
+        spill_values = torch.bitwise_right_shift(flat[spill_mask], 8 - bit_positions[spill_mask])
+        packed.index_add_(0, spill_indices, spill_values)
+
+    return torch.bitwise_and(packed, 0xFF).to(dtype=torch.uint8), num_values
+
+
+def _unpack_unsigned_values(packed: torch.Tensor, *, num_bits: int, num_values: int) -> torch.Tensor:
+    packed_flat = packed.reshape(-1).to(dtype=torch.int64, device="cpu")
+    if num_bits >= 8:
+        return packed_flat[:num_values].to(dtype=torch.int64)
+
+    bit_offsets = torch.arange(int(num_values), dtype=torch.int64) * int(num_bits)
+    byte_indices = torch.div(bit_offsets, 8, rounding_mode="floor")
+    bit_positions = torch.remainder(bit_offsets, 8)
+    unpacked = torch.bitwise_right_shift(packed_flat[byte_indices], bit_positions)
+
+    spill_mask = bit_positions + int(num_bits) > 8
+    if torch.any(spill_mask):
+        spill = torch.bitwise_left_shift(
+            packed_flat[byte_indices[spill_mask] + 1],
+            8 - bit_positions[spill_mask],
+        )
+        unpacked[spill_mask] = torch.bitwise_or(unpacked[spill_mask], spill)
+
+    return torch.bitwise_and(unpacked, (1 << int(num_bits)) - 1)
+
+
 @dataclass(frozen=True)
 class TruncationFloatCodec:
     """Software low-bit floating-point activation compression.
@@ -22,7 +65,8 @@ class TruncationFloatCodec:
     - E2M1: 4 total bits, 2 exponent bits, 1 mantissa bit (bias=1)
 
     Notes:
-    - Encodes to a torch.uint8 tensor on CPU.
+    - Packs FP4 values into sub-byte uint8 storage on CPU.
+    - Stores FP8 values as uint8 on CPU.
     - Decodes back to float32 by default (or requested dtype/device).
     - Handles zeros, subnormals, inf, nan.
 
@@ -138,12 +182,22 @@ class TruncationFloatCodec:
         # Add sign bit (MSB in the chosen layout)
         q = q | (sign << sign_shift)
 
+        if total_bits < 8:
+            q_payload, packed_num_values = _pack_unsigned_values(q, num_bits=total_bits)
+            packed = True
+        else:
+            q_payload = q
+            packed_num_values = int(q.numel())
+            packed = False
+
         return {
             "codec": self._codec_name(),
-            "q": q,
+            "q": q_payload,
             "shape": tuple(x_cpu.shape),
             "layout": str(self.layout).strip().lower(),
             "num_bits": total_bits,
+            "packed": packed,
+            "packed_num_values": packed_num_values,
         }
 
     def decode(
@@ -166,6 +220,11 @@ class TruncationFloatCodec:
         layout = payload.get("layout", self.layout)
         exp_bits, mant_bits, bias, max_exp, total_bits = TruncationFloatCodec(layout=str(layout))._layout_params()
         sign_shift = exp_bits + mant_bits
+        if bool(payload.get("packed", False)):
+            packed_num_values = int(payload.get("packed_num_values", 0) or 0)
+            if packed_num_values <= 0:
+                raise ValueError("packed floating-point payload must include a positive packed_num_values")
+            q = _unpack_unsigned_values(q, num_bits=total_bits, num_values=packed_num_values).to(dtype=torch.uint8)
 
         target_device = device if device is not None else "cpu"
         q_dev = q.to(device=target_device)

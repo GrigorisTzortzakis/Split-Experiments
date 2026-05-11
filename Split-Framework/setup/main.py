@@ -141,6 +141,7 @@ def main():
     parser.add_argument("--quantization-granularity", dest="quantization_granularity", type=str, default=None)
     parser.add_argument("--quantization-group-size", dest="quantization_group_size", type=int, default=None)
     parser.add_argument("--sparsity-k", dest="sparsity_k", type=float, default=None)
+    parser.add_argument("--paper-top-k-alpha", dest="paper_top_k_alpha", type=float, default=None)
     parser.add_argument("--dimensionality-reduction-ratio", dest="dimensionality_reduction_ratio", type=float, default=None)
     parser.add_argument("--truncation-scale", dest="truncation_scale", type=float, default=None)
     parser.add_argument("--forward-truncation-scale", dest="forward_truncation_scale", type=float, default=None)
@@ -207,6 +208,8 @@ def main():
         args["quantization_group_size"] = int(cli_args.quantization_group_size)
     if cli_args.sparsity_k is not None:
         args["sparsity_k"] = float(cli_args.sparsity_k)
+    if cli_args.paper_top_k_alpha is not None:
+        args["paper_top_k_alpha"] = float(cli_args.paper_top_k_alpha)
     if cli_args.dimensionality_reduction_ratio is not None:
         args["dimensionality_reduction_ratio"] = float(cli_args.dimensionality_reduction_ratio)
     if cli_args.truncation_scale is not None:
@@ -346,7 +349,7 @@ def main():
     #   results/logs/<algorithm>/<model>/reduce_comm_cost/quantization/<technique>/<direction>/<variant>/
     #   results/logs/<algorithm>/<model>/reduce_comm_cost/sparsity/
     #   results/logs/<algorithm>/<model>/reduce_comm_cost/dimensionality_reduction/
-    quantize_forward = bool(args["quantize_forward"]) if args["quantize_forward"] is not None else bool(args["quantize_activations"]) if args["quantize_activations"] is not None else True
+    quantize_forward = bool(args["quantize_forward"]) if args["quantize_forward"] is not None else bool(args["quantize_activations"]) if args["quantize_activations"] is not None else False
     quantize_backward = bool(args["quantize_backward"]) if args["quantize_backward"] is not None else False
 
     group_root = PROJECT_ROOT / "results" / "logs" / group_dir_name
@@ -376,7 +379,7 @@ def main():
                 numeric = float(value)
             except Exception:
                 return int(default)
-            if 0.0 < numeric <= 1.0:
+            if 0.0 < numeric < 1.0:
                 numeric *= 100.0
             normalized = int(round(numeric))
             return normalized if normalized in (1, 5, 10, 25, 50) else int(default)
@@ -438,8 +441,11 @@ def main():
             if kind in ("random_top_k", "random_topk", "random_top_k_sparsity"):
                 random_percent = _normalize_sparsity_percent(args.get("sparsity_k"), 5)
                 return ("sparsity", ("random_top_k", f"{random_percent}pct"))
-            if kind == "autoencoder":
-                return ("dimensionality_reduction", ("autoencoder", f"{dimensionality_ratio_pct}pct"))
+            if kind in ("paper_top_k", "paper_topk", "paper_top_k_sparsity"):
+                random_percent = _normalize_sparsity_percent(args.get("sparsity_k"), 5)
+                return ("sparsity", ("paper_top_k", f"{random_percent}pct"))
+            if kind in ("random_projection", "autoencoder"):
+                return ("dimensionality_reduction", ("random_projection", f"{dimensionality_ratio_pct}pct"))
             if kind in ("low_rank_pca", "low_rank_projection", "pca_projection", "pca", "low_rank"):
                 return ("dimensionality_reduction", ("low_rank_pca", f"{dimensionality_ratio_pct}pct"))
             if kind in ("fp8_e4m3", "float8_e4m3", "e4m3", "float8", "float"):

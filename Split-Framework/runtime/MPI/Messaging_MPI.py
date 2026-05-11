@@ -638,7 +638,7 @@ class MessageManager(Observer):
         self._tensor_distribution_samples = self._build_tensor_distribution_samples(int(total_epochs or 0))
         # --- Communication compression hooks (forward/backward quantization) ---
         # Backward-compat: `quantize_activations` previously controlled forward-only.
-        quantize_acts_legacy = _get_bool_arg(args, "quantize_activations", True)
+        quantize_acts_legacy = _get_bool_arg(args, "quantize_activations", False)
 
         # New switches:
         # - quantize_forward: quantize messages carrying "activations"
@@ -659,7 +659,7 @@ class MessageManager(Observer):
             if value is None:
                 return int(default)
             numeric = float(value)
-            if 0.0 < numeric <= 1.0:
+            if 0.0 < numeric < 1.0:
                 numeric *= 100.0
             normalized = int(round(numeric))
             if normalized not in (1, 5, 10, 25, 50):
@@ -721,9 +721,10 @@ class MessageManager(Observer):
                 TruncationFloatCodec as ArithmeticFloatCodec,
             )
             from compression.dimensionality_reduction import (
-                AutoencoderCodec,
                 LowRankPCAProjectionCodec,
+                RandomProjectionCodec,
             )
+            from compression.comparison_papers import PaperTopKSparsityCodec
             from compression.sparsity import RandomTopKSparsityCodec, TopKSparsityCodec
             from compression.quantization.codeword import (
                 LloydMaxCodebookUInt8Codec,
@@ -735,8 +736,8 @@ class MessageManager(Observer):
 
             if kind in ("dynamic_symmetric_int8", "dynamic_int8", "int8", "int"):
                 return IntCodec(num_bits=codec_bits, granularity=codec_granularity, group_size=quantization_group_size)
-            if kind == "autoencoder":
-                return AutoencoderCodec(
+            if kind in ("random_projection", "autoencoder"):
+                return RandomProjectionCodec(
                     reduction_ratio=_normalize_dimensionality_ratio(dimensionality_reduction_ratio, 0.25),
                     storage_bits=max(8, codec_bits),
                 )
@@ -748,7 +749,16 @@ class MessageManager(Observer):
             if kind in ("top_k", "topk", "top_k_sparsity"):
                 return TopKSparsityCodec(k_percent=_normalize_sparsity_percent(sparsity_k, 1), storage_bits=max(8, codec_bits))
             if kind in ("random_top_k", "random_topk", "random_top_k_sparsity"):
-                return RandomTopKSparsityCodec(k_percent=_normalize_sparsity_percent(sparsity_k, 5), storage_bits=max(8, codec_bits))
+                return RandomTopKSparsityCodec(
+                    k_percent=_normalize_sparsity_percent(sparsity_k, 5),
+                    storage_bits=max(8, codec_bits),
+                )
+            if kind in ("paper_top_k", "paper_topk", "paper_top_k_sparsity"):
+                return PaperTopKSparsityCodec(
+                    k_percent=_normalize_sparsity_percent(sparsity_k, 5),
+                    alpha=_get_float_arg(self.args, "paper_top_k_alpha", 0.1),
+                    storage_bits=max(8, codec_bits),
+                )
             if kind in ("dynamic_symmetric_int8_per_channel", "dynamic_int8_per_channel", "int8_per_channel", "per_channel_int8"):
                 return IntCodec(num_bits=codec_bits, granularity="per_channel", group_size=quantization_group_size)
             if kind in ("fixed_scale_int8", "fixed_int8"):
@@ -799,7 +809,11 @@ class MessageManager(Observer):
                 if self._fwd_codec is None:
                     raise ValueError("Forward quantization was requested but no forward codec was created.")
             if self._quantize_backward:
-                self._bwd_codec = _build_codec(self._backward_quantization, scale_key_prefix="backward", bits_override=quantization_bits)
+                shared_sparse_kind = str(self._forward_quantization or "").strip().lower() in {"paper_top_k", "paper_topk", "paper_top_k_sparsity"}
+                if self._quantize_forward and shared_sparse_kind and str(self._backward_quantization or "").strip().lower() == str(self._forward_quantization or "").strip().lower():
+                    self._bwd_codec = self._fwd_codec
+                else:
+                    self._bwd_codec = _build_codec(self._backward_quantization, scale_key_prefix="backward", bits_override=quantization_bits)
                 if self._bwd_codec is None:
                     raise ValueError("Backward quantization was requested but no backward codec was created.")
         except Exception as exc:
@@ -1215,6 +1229,7 @@ class MessageManager(Observer):
             "top_k_sparsity",
             "random_top_k_sparsity",
             "autoencoder",
+            "random_projection",
             "low_rank_pca_projection",
             "composed",
         ):
@@ -1332,16 +1347,13 @@ class MessageManager(Observer):
             raw_bytes, _, _ = self._summarize_tensor_payload_bytes(params["activations"], preserve_second_if_pair=True)
             quant_time = 0.0
             if self._quantize_forward and self._fwd_codec is not None:
-                try:
-                    quant_started = time.perf_counter()
-                    params["activations"] = self._encode_tensor_obj(
-                        params["activations"],
-                        self._fwd_codec,
-                        preserve_second_if_pair=True,
-                    )
-                    quant_time = time.perf_counter() - quant_started
-                except Exception:
-                    quant_time = 0.0
+                quant_started = time.perf_counter()
+                params["activations"] = self._encode_tensor_obj(
+                    params["activations"],
+                    self._fwd_codec,
+                    preserve_second_if_pair=True,
+                )
+                quant_time = time.perf_counter() - quant_started
             _, quantized_bytes, metadata_bytes = self._summarize_tensor_payload_bytes(
                 params["activations"],
                 preserve_second_if_pair=True,
@@ -1364,16 +1376,13 @@ class MessageManager(Observer):
             raw_bytes, _, _ = self._summarize_tensor_payload_bytes(params["activation_grads"], preserve_second_if_pair=False)
             quant_time = 0.0
             if self._quantize_backward and self._bwd_codec is not None:
-                try:
-                    quant_started = time.perf_counter()
-                    params["activation_grads"] = self._encode_tensor_obj(
-                        params["activation_grads"],
-                        self._bwd_codec,
-                        preserve_second_if_pair=False,
-                    )
-                    quant_time = time.perf_counter() - quant_started
-                except Exception:
-                    quant_time = 0.0
+                quant_started = time.perf_counter()
+                params["activation_grads"] = self._encode_tensor_obj(
+                    params["activation_grads"],
+                    self._bwd_codec,
+                    preserve_second_if_pair=False,
+                )
+                quant_time = time.perf_counter() - quant_started
             _, quantized_bytes, metadata_bytes = self._summarize_tensor_payload_bytes(
                 params["activation_grads"],
                 preserve_second_if_pair=False,
@@ -1413,24 +1422,18 @@ class MessageManager(Observer):
                 self._consume_comm_analysis(params, key)
         # Forward-path activations
         if self._quantize_forward and self._fwd_codec is not None and "activations" in params:
-            try:
-                params["activations"] = self._decode_tensor_obj(
-                    params["activations"],
-                    self._fwd_codec,
-                    preserve_second_if_pair=True,
-                )
-            except Exception:
-                pass
+            params["activations"] = self._decode_tensor_obj(
+                params["activations"],
+                self._fwd_codec,
+                preserve_second_if_pair=True,
+            )
         # Backward-path gradients
         if self._quantize_backward and self._bwd_codec is not None and "activation_grads" in params:
-            try:
-                params["activation_grads"] = self._decode_tensor_obj(
-                    params["activation_grads"],
-                    self._bwd_codec,
-                    preserve_second_if_pair=False,
-                )
-            except Exception:
-                pass
+            params["activation_grads"] = self._decode_tensor_obj(
+                params["activation_grads"],
+                self._bwd_codec,
+                preserve_second_if_pair=False,
+            )
 
         # Restore raw tensors to the receiver's configured device.
         device = self._current_device()

@@ -129,13 +129,56 @@ def _restore_segments(segments: Sequence[torch.Tensor], metadata: Dict[str, Any]
     return channel_tensor.permute(inverse_perm).contiguous()
 
 
+def _pack_unsigned_values(values: torch.Tensor, *, num_bits: int) -> tuple[torch.Tensor, int]:
+    flat = values.reshape(-1).to(dtype=torch.int64, device="cpu")
+    if num_bits >= 8:
+        return flat.to(dtype=torch.uint8), int(flat.numel())
+
+    num_values = int(flat.numel())
+    total_bits = num_values * int(num_bits)
+    packed = torch.zeros((max(1, (total_bits + 7) // 8),), dtype=torch.int64)
+    bit_offsets = torch.arange(num_values, dtype=torch.int64) * int(num_bits)
+    byte_indices = torch.div(bit_offsets, 8, rounding_mode="floor")
+    bit_positions = torch.remainder(bit_offsets, 8)
+    packed.index_add_(0, byte_indices, torch.bitwise_left_shift(flat, bit_positions))
+
+    spill_mask = bit_positions + int(num_bits) > 8
+    if torch.any(spill_mask):
+        spill_indices = byte_indices[spill_mask] + 1
+        spill_values = torch.bitwise_right_shift(flat[spill_mask], 8 - bit_positions[spill_mask])
+        packed.index_add_(0, spill_indices, spill_values)
+
+    return torch.bitwise_and(packed, 0xFF).to(dtype=torch.uint8), num_values
+
+
+def _unpack_unsigned_values(packed: torch.Tensor, *, num_bits: int, num_values: int) -> torch.Tensor:
+    packed_flat = packed.reshape(-1).to(dtype=torch.int64, device="cpu")
+    if num_bits >= 8:
+        return packed_flat[:num_values].to(dtype=torch.int64)
+
+    bit_offsets = torch.arange(int(num_values), dtype=torch.int64) * int(num_bits)
+    byte_indices = torch.div(bit_offsets, 8, rounding_mode="floor")
+    bit_positions = torch.remainder(bit_offsets, 8)
+    unpacked = torch.bitwise_right_shift(packed_flat[byte_indices], bit_positions)
+
+    spill_mask = bit_positions + int(num_bits) > 8
+    if torch.any(spill_mask):
+        spill = torch.bitwise_left_shift(
+            packed_flat[byte_indices[spill_mask] + 1],
+            8 - bit_positions[spill_mask],
+        )
+        unpacked[spill_mask] = torch.bitwise_or(unpacked[spill_mask], spill)
+
+    return torch.bitwise_and(unpacked, (1 << int(num_bits)) - 1)
+
+
 @dataclass(frozen=True)
 class IntCodec:
     """Dynamic symmetric integer quantization with configurable granularity.
 
     - Supports 2, 3, 4, 6, and 8 bits.
     - Supports per-tensor, per-channel, and per-group scaling.
-    - Stores values as int8 tensors for every supported bit width.
+    - Packs sub-byte widths into uint8 payloads on the wire.
     - Quantize: q = round(x * S)
     - Clip: q in the signed range for the selected bit width.
     - Send one scale per tensor/channel/group.
@@ -188,13 +231,24 @@ class IntCodec:
             q_segments.append(torch.clamp(q_segment, qmin, qmax).to(dtype=torch.int8))
 
         stored_q = _restore_segments(q_segments, metadata)
+        num_bits = _normalize_num_bits(self.num_bits)
+        if num_bits < 8:
+            unsigned_q = stored_q.to(dtype=torch.int16) - int(qmin)
+            q_payload, packed_num_values = _pack_unsigned_values(unsigned_q, num_bits=num_bits)
+            packed = True
+        else:
+            q_payload = stored_q
+            packed_num_values = int(stored_q.numel())
+            packed = False
 
         return {
             "codec": self._codec_name(),
-            "q": stored_q,
+            "q": q_payload,
             "scale": torch.tensor(scale_values, dtype=torch.float32),
             "shape": tuple(x_cpu.shape),
-            "num_bits": _normalize_num_bits(self.num_bits),
+            "num_bits": num_bits,
+            "packed": packed,
+            "packed_num_values": packed_num_values,
             "granularity": metadata["granularity"],
             "channel_axis": metadata.get("channel_axis"),
             "group_size": metadata.get("group_size"),
@@ -218,8 +272,8 @@ class IntCodec:
             raise KeyError("Invalid payload, missing key: 'q'")
 
         q = payload["q"]
-        if not isinstance(q, torch.Tensor) or q.dtype != torch.int8:
-            raise TypeError("payload['q'] must be a torch.int8 Tensor")
+        if not isinstance(q, torch.Tensor):
+            raise TypeError("payload['q'] must be a torch.Tensor")
 
         num_bits = _normalize_num_bits(int(payload.get("num_bits", self.num_bits)))
         scale = payload.get("scale", None)
@@ -241,7 +295,20 @@ class IntCodec:
             "inverse_perm": payload.get("inverse_perm"),
         }
 
-        q_dev = q.to(device=target_device)
+        if bool(payload.get("packed", False)):
+            packed_num_values = int(payload.get("packed_num_values", 0) or 0)
+            if q.dtype != torch.uint8:
+                raise TypeError("packed payload['q'] must be a torch.uint8 Tensor")
+            if packed_num_values <= 0:
+                raise ValueError("packed payload must include a positive packed_num_values")
+            q_unsigned = _unpack_unsigned_values(q, num_bits=num_bits, num_values=packed_num_values)
+            q_shaped = (q_unsigned + self._quant_bounds()[0]).to(dtype=torch.int8).reshape(metadata["shape"])
+        else:
+            if q.dtype != torch.int8:
+                raise TypeError("payload['q'] must be a torch.int8 Tensor")
+            q_shaped = q.to(device="cpu")
+
+        q_dev = q_shaped.to(device=target_device)
         q_segments, _ = _split_segments(
             q_dev.to(dtype=torch.float32),
             granularity=metadata["granularity"],

@@ -81,6 +81,12 @@ class Config:
         else:
             self.extra[key] = value
 
+    def get(self, key: str, default: Any = None) -> Any:
+        if hasattr(self, key):
+            value = getattr(self, key)
+            return default if value is None else value
+        return self.extra.get(key, default)
+
     def as_dict(self) -> Dict[str, Any]:
         d = {k: getattr(self, k) for k in self.__dataclass_fields__.keys() if k != "extra"}
         d.update(self.extra)

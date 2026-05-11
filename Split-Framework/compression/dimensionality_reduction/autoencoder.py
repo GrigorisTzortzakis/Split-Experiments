@@ -25,7 +25,7 @@ def _orthogonal_projection(input_dim: int, latent_dim: int, seed: int) -> torch.
 
 
 @dataclass(frozen=True)
-class AutoencoderCodec:
+class RandomProjectionCodec:
     reduction_ratio: float = 0.25
     block_size: int = 128
     seed: int = 17
@@ -54,7 +54,7 @@ class AutoencoderCodec:
         latent = torch.matmul(blocks, encoder).to(dtype=_storage_dtype(self.storage_bits))
 
         return {
-            "codec": "autoencoder",
+            "codec": "random_projection",
             "q": latent,
             "shape": tuple(int(dim) for dim in x_cpu.shape),
             "block_size": block_size,
@@ -92,3 +92,6 @@ class AutoencoderCodec:
         if pad_length:
             flat = flat[:-pad_length]
         return flat.reshape(shape)
+
+
+AutoencoderCodec = RandomProjectionCodec

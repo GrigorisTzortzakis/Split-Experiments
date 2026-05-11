@@ -1722,9 +1722,12 @@ def _basic_label_from_path(log_path: Path) -> str:
     rel = log_path.as_posix().lower()
     if "/baseline/" in rel:
         return "baseline (no quant)"
+    match = re.search(r"/dimensionality_reduction/random_projection/(\d+)pct/", rel)
+    if match:
+        return f"random projection {match.group(1)}%"
     match = re.search(r"/dimensionality_reduction/autoencoder/(\d+)pct/", rel)
     if match:
-        return f"autoencoder {match.group(1)}%"
+        return f"random projection {match.group(1)}%"
     match = re.search(r"/dimensionality_reduction/low_rank_pca/(\d+)pct/", rel)
     if match:
         return f"low-rank pca {match.group(1)}%"
@@ -1734,6 +1737,9 @@ def _basic_label_from_path(log_path: Path) -> str:
     match = re.search(r"/sparsity/random_top_k/(\d+)pct/", rel)
     if match:
         return f"random top-k {match.group(1)}%"
+    match = re.search(r"/sparsity/paper_top_k/(\d+)pct/", rel)
+    if match:
+        return f"paper top-k {match.group(1)}%"
     if "/arithmetic_conversion/int/" in rel or "/arithmetic_conversion/int8/" in rel:
         return "int"
     if "/arithmetic_conversion/float/" in rel or "/arithmetic_conversion/fp8/" in rel:
@@ -1953,10 +1959,10 @@ def plot_basic_scenario_comparisons(*, log_files: List[Path], out_dir: Path) -> 
 
     wanted_order = [
         "baseline (no quant)",
-        "autoencoder 12%",
-        "autoencoder 13%",
-        "autoencoder 25%",
-        "autoencoder 50%",
+        "random projection 12%",
+        "random projection 13%",
+        "random projection 25%",
+        "random projection 50%",
         "low-rank pca 12%",
         "low-rank pca 13%",
         "low-rank pca 25%",
@@ -1988,10 +1994,10 @@ def plot_basic_scenario_comparisons(*, log_files: List[Path], out_dir: Path) -> 
     }
     colors = {
         "baseline (no quant)": "#111111",
-        "autoencoder 12%": "#be123c",
-        "autoencoder 13%": "#be123c",
-        "autoencoder 25%": "#e11d48",
-        "autoencoder 50%": "#fb7185",
+        "random projection 12%": "#be123c",
+        "random projection 13%": "#be123c",
+        "random projection 25%": "#e11d48",
+        "random projection 50%": "#fb7185",
         "low-rank pca 12%": "#075985",
         "low-rank pca 13%": "#075985",
         "low-rank pca 25%": "#0284c7",

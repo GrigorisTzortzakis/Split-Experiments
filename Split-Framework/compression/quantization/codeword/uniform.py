@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Sequence
 
 import torch
@@ -134,12 +134,56 @@ def _restore_segments(segments: Sequence[torch.Tensor], metadata: Dict[str, Any]
     return channel_tensor.permute(inverse_perm).contiguous()
 
 
-@dataclass(frozen=True)
+def _pack_unsigned_values(values: torch.Tensor, *, num_bits: int) -> tuple[torch.Tensor, int]:
+    flat = values.reshape(-1).to(dtype=torch.int64, device="cpu")
+    if num_bits >= 8:
+        return flat.to(dtype=torch.uint8), int(flat.numel())
+
+    num_values = int(flat.numel())
+    total_bits = num_values * int(num_bits)
+    packed = torch.zeros((max(1, (total_bits + 7) // 8),), dtype=torch.int64)
+    bit_offsets = torch.arange(num_values, dtype=torch.int64) * int(num_bits)
+    byte_indices = torch.div(bit_offsets, 8, rounding_mode="floor")
+    bit_positions = torch.remainder(bit_offsets, 8)
+    packed.index_add_(0, byte_indices, torch.bitwise_left_shift(flat, bit_positions))
+
+    spill_mask = bit_positions + int(num_bits) > 8
+    if torch.any(spill_mask):
+        spill_indices = byte_indices[spill_mask] + 1
+        spill_values = torch.bitwise_right_shift(flat[spill_mask], 8 - bit_positions[spill_mask])
+        packed.index_add_(0, spill_indices, spill_values)
+
+    return torch.bitwise_and(packed, 0xFF).to(dtype=torch.uint8), num_values
+
+
+def _unpack_unsigned_values(packed: torch.Tensor, *, num_bits: int, num_values: int) -> torch.Tensor:
+    packed_flat = packed.reshape(-1).to(dtype=torch.int64, device="cpu")
+    if num_bits >= 8:
+        return packed_flat[:num_values].to(dtype=torch.int64)
+
+    bit_offsets = torch.arange(int(num_values), dtype=torch.int64) * int(num_bits)
+    byte_indices = torch.div(bit_offsets, 8, rounding_mode="floor")
+    bit_positions = torch.remainder(bit_offsets, 8)
+    unpacked = torch.bitwise_right_shift(packed_flat[byte_indices], bit_positions)
+
+    spill_mask = bit_positions + int(num_bits) > 8
+    if torch.any(spill_mask):
+        spill = torch.bitwise_left_shift(
+            packed_flat[byte_indices[spill_mask] + 1],
+            8 - bit_positions[spill_mask],
+        )
+        unpacked[spill_mask] = torch.bitwise_or(unpacked[spill_mask], spill)
+
+    return torch.bitwise_and(unpacked, (1 << int(num_bits)) - 1)
+
+
+@dataclass
 class UniformCodebookCodec:
     """Uniform codebook quantizer with configurable bit width and granularity.
 
     - Build a uniform codebook of $2^{bits}$ real-valued codewords.
-    - Quantize each value to the nearest codeword index stored as uint8.
+    - Quantize each value to the nearest codeword index.
+    - Pack sub-byte indices on the wire for 2, 3, 4, and 6 bits.
     - Decode by table lookup.
     """
 
@@ -148,6 +192,8 @@ class UniformCodebookCodec:
     granularity: str = "per_tensor"
     channel_axis: int = 1
     group_size: int = 32
+    _encode_cache: Dict[str, torch.Tensor] = field(default_factory=dict, init=False, repr=False)
+    _decode_cache: Dict[str, torch.Tensor] = field(default_factory=dict, init=False, repr=False)
 
     def _codec_name(self) -> str:
         return "uniform_codebook"
@@ -171,6 +217,15 @@ class UniformCodebookCodec:
             return -a, a
         raise ValueError(f"Unsupported range_mode: {self.range_mode!r}")
 
+    def _cache_id(self, metadata: Dict[str, Any], *, levels: int) -> str:
+        shape = tuple(int(dim) for dim in metadata.get("shape", ()))
+        return (
+            f"uniform_{_normalize_granularity(metadata.get('granularity', self.granularity))}"
+            f"_{shape}_{int(metadata.get('channel_axis', self.channel_axis) or 0)}"
+            f"_{int(metadata.get('group_size', self.group_size) or 1)}"
+            f"_{levels}_{str(self.range_mode).strip().lower()}"
+        )
+
     def encode(self, x: torch.Tensor) -> Payload:
         if not isinstance(x, torch.Tensor):
             raise TypeError(f"encode expects a torch.Tensor, got {type(x)!r}")
@@ -184,31 +239,51 @@ class UniformCodebookCodec:
         )
 
         levels = self._levels()
-        codebooks: List[torch.Tensor] = []
+        cache_id = self._cache_id(metadata, levels=levels)
         q_segments: List[torch.Tensor] = []
-        for segment in segments:
-            x_min, x_max = self._compute_endpoints(segment)
-            if x_max == x_min:
-                codebook = torch.full((levels,), x_min, dtype=torch.float32)
-                idx_u8 = torch.zeros_like(segment, dtype=torch.uint8)
-            else:
-                codebook = torch.linspace(x_min, x_max, steps=levels, dtype=torch.float32)
-                step = (x_max - x_min) / float(levels - 1)
-                idx = torch.round((segment - x_min) / step)
-                idx_u8 = torch.clamp(idx, 0, levels - 1).to(dtype=torch.uint8)
-            codebooks.append(codebook)
+        if cache_id in self._encode_cache:
+            codebook = self._encode_cache[cache_id]
+            if int(codebook.shape[0]) != len(segments):
+                raise ValueError("cached uniform codebook segment count does not match current tensor segmentation")
+            cache_write = False
+        else:
+            codebooks: List[torch.Tensor] = []
+            for segment in segments:
+                x_min, x_max = self._compute_endpoints(segment)
+                if x_max == x_min:
+                    codebooks.append(torch.full((levels,), x_min, dtype=torch.float32))
+                else:
+                    codebooks.append(torch.linspace(x_min, x_max, steps=levels, dtype=torch.float32))
+            codebook = torch.stack(codebooks, dim=0)
+            self._encode_cache[cache_id] = codebook
+            cache_write = True
+
+        for index, segment in enumerate(segments):
+            segment_codebook = codebook[index]
+            boundaries = 0.5 * (segment_codebook[:-1] + segment_codebook[1:])
+            idx_u8 = torch.bucketize(segment.reshape(-1), boundaries).reshape(segment.shape).to(dtype=torch.uint8)
             q_segments.append(idx_u8)
 
         q = _restore_segments(q_segments, metadata)
-        codebook = torch.stack(codebooks, dim=0)
+        num_bits = _normalize_num_bits(self.num_bits)
+        if num_bits < 8:
+            q_payload, packed_num_values = _pack_unsigned_values(q, num_bits=num_bits)
+            packed = True
+        else:
+            q_payload = q
+            packed_num_values = int(q.numel())
+            packed = False
 
-        return {
+        payload = {
             "codec": self._codec_name(),
-            "q": q,
-            "codebook": codebook,
+            "q": q_payload,
             "shape": tuple(x_cpu.shape),
             "range_mode": str(self.range_mode).strip().lower(),
-            "num_bits": _normalize_num_bits(self.num_bits),
+            "num_bits": num_bits,
+            "packed": packed,
+            "packed_num_values": packed_num_values,
+            "cache_id": cache_id,
+            "cache_write": cache_write,
             "granularity": metadata["granularity"],
             "channel_axis": metadata.get("channel_axis"),
             "group_size": metadata.get("group_size"),
@@ -217,6 +292,9 @@ class UniformCodebookCodec:
             "channel_group_counts": metadata.get("channel_group_counts"),
             "inverse_perm": metadata.get("inverse_perm"),
         }
+        if cache_write:
+            payload["codebook"] = codebook
+        return payload
 
     def decode(
         self,
@@ -229,25 +307,35 @@ class UniformCodebookCodec:
             raise TypeError(f"decode expects a dict payload, got {type(payload)!r}")
         if "q" not in payload:
             raise KeyError("Invalid payload, missing key: 'q'")
-        if "codebook" not in payload:
-            raise KeyError("Invalid payload, missing key: 'codebook'")
-
         q = payload["q"]
         if not isinstance(q, torch.Tensor) or q.dtype != torch.uint8:
             raise TypeError("payload['q'] must be a torch.uint8 Tensor")
 
-        codebook = payload["codebook"]
-        if not isinstance(codebook, torch.Tensor) or codebook.dtype != torch.float32 or codebook.ndim != 2:
-            raise TypeError("payload['codebook'] must be a 2D torch.float32 Tensor")
         num_bits = int(payload.get("num_bits", self.num_bits))
         if num_bits not in SUPPORTED_NUM_BITS:
             raise ValueError(f"payload num_bits must be one of {SUPPORTED_NUM_BITS}")
-        if int(codebook.shape[1]) != (1 << num_bits):
-            raise ValueError(f"payload['codebook'] must have shape (segments, {1 << num_bits})")
 
         shape = payload.get("shape", None)
         target_device = device if device is not None else "cpu"
-        q_dev = q.to(device=target_device)
+        cache_id = str(payload.get("cache_id") or self._cache_id({
+            "shape": tuple(int(s) for s in shape) if shape is not None else tuple(int(s) for s in q.shape),
+            "granularity": payload.get("granularity", self.granularity),
+            "channel_axis": payload.get("channel_axis", self.channel_axis),
+            "group_size": payload.get("group_size", self.group_size),
+        }, levels=(1 << num_bits)))
+
+        if "codebook" in payload:
+            codebook = payload["codebook"]
+            if not isinstance(codebook, torch.Tensor) or codebook.dtype != torch.float32 or codebook.ndim != 2:
+                raise TypeError("payload['codebook'] must be a 2D torch.float32 Tensor")
+            if int(codebook.shape[1]) != (1 << num_bits):
+                raise ValueError(f"payload['codebook'] must have shape (segments, {1 << num_bits})")
+            self._decode_cache[cache_id] = codebook
+        else:
+            codebook = self._decode_cache.get(cache_id)
+            if codebook is None:
+                raise KeyError(f"Uniform codebook payload is missing codebook and cache_id {cache_id!r} was not initialized")
+
         cb_dev = codebook.to(device=target_device)
 
         metadata = {
@@ -261,8 +349,16 @@ class UniformCodebookCodec:
             "inverse_perm": payload.get("inverse_perm"),
         }
 
+        if bool(payload.get("packed", False)):
+            packed_num_values = int(payload.get("packed_num_values", 0) or 0)
+            if packed_num_values <= 0:
+                raise ValueError("packed payload must include a positive packed_num_values")
+            q_shaped = _unpack_unsigned_values(q, num_bits=num_bits, num_values=packed_num_values).to(dtype=torch.uint8).reshape(metadata["shape"])
+        else:
+            q_shaped = q.to(device="cpu")
+
         q_segments, _ = _split_segments(
-            q_dev.to(dtype=torch.float32),
+            q_shaped.to(device=target_device, dtype=torch.float32),
             granularity=metadata["granularity"],
             channel_axis=int(metadata.get("channel_axis", self.channel_axis) or 0),
             group_size=int(metadata.get("group_size", self.group_size) or 1),
@@ -279,12 +375,12 @@ class UniformCodebookCodec:
         return out.to(dtype=dtype)
 
 
-@dataclass(frozen=True)
+@dataclass
 class UniformPerChannelCodebookCodec(UniformCodebookCodec):
     granularity: str = "per_channel"
 
 
-@dataclass(frozen=True)
+@dataclass
 class UniformPerGroupCodebookCodec(UniformCodebookCodec):
     granularity: str = "per_group"
 
