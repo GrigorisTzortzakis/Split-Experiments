@@ -1,5 +1,6 @@
 ﻿"""Server-side model/trainer for the `vanilla` algorithm variant."""
 
+from compression.comparison_papers.paper_top_k import transfer_paper_top_k_cache_id
 from runtime.exports.log import Log
 import torch
 import torch.nn as nn
@@ -65,7 +66,7 @@ class SplitNNServer():
         # (e.g., after compression/quantization codecs). Server-side backprop
         # requires grads w.r.t. the received activations.
         if isinstance(acts, torch.Tensor) and not acts.requires_grad:
-            acts = acts.detach().requires_grad_(True)
+            acts = transfer_paper_top_k_cache_id(acts, acts.detach().requires_grad_(True))
 
         self.acts = acts
         self.optimizer.zero_grad()
@@ -93,7 +94,7 @@ class SplitNNServer():
     def backward_pass(self):
         self.loss.backward()
         self.optimizer.step()
-        grads = self.acts.grad
+        grads = transfer_paper_top_k_cache_id(self.acts, self.acts.grad)
         self.loss = None
         self.acts = None
         return grads

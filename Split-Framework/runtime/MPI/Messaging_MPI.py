@@ -724,7 +724,7 @@ class MessageManager(Observer):
                 LowRankPCAProjectionCodec,
                 RandomProjectionCodec,
             )
-            from compression.comparison_papers import PaperTopKSparsityCodec
+            from compression.comparison_papers import PaperTopKSparsityCodec, SplitFCCodec
             from compression.sparsity import RandomTopKSparsityCodec, TopKSparsityCodec
             from compression.quantization.codeword import (
                 LloydMaxCodebookUInt8Codec,
@@ -758,6 +758,17 @@ class MessageManager(Observer):
                     k_percent=_normalize_sparsity_percent(sparsity_k, 5),
                     alpha=_get_float_arg(self.args, "paper_top_k_alpha", 0.1),
                     storage_bits=max(8, codec_bits),
+                )
+            if kind in ("split_fc", "splitfc"):
+                split_fc_ratio = _get_float_arg(self.args, "split_fc_reduction_ratio", None)
+                if split_fc_ratio is None:
+                    split_fc_ratio = 16.0
+                return SplitFCCodec(
+                    reduction_ratio=float(split_fc_ratio),
+                    feature_bits_per_entry=float(max(1, codec_bits)),
+                    gradient_bits_per_entry=float(max(1, codec_bits)),
+                    endpoint_levels=int(_get_float_arg(self.args, "split_fc_endpoint_levels", 200) or 200),
+                    seed=_get_float_arg(self.args, "seed", None),
                 )
             if kind in ("dynamic_symmetric_int8_per_channel", "dynamic_int8_per_channel", "int8_per_channel", "per_channel_int8"):
                 return IntCodec(num_bits=codec_bits, granularity="per_channel", group_size=quantization_group_size)
@@ -809,7 +820,7 @@ class MessageManager(Observer):
                 if self._fwd_codec is None:
                     raise ValueError("Forward quantization was requested but no forward codec was created.")
             if self._quantize_backward:
-                shared_sparse_kind = str(self._forward_quantization or "").strip().lower() in {"paper_top_k", "paper_topk", "paper_top_k_sparsity"}
+                shared_sparse_kind = str(self._forward_quantization or "").strip().lower() in {"paper_top_k", "paper_topk", "paper_top_k_sparsity", "split_fc", "splitfc"}
                 if self._quantize_forward and shared_sparse_kind and str(self._backward_quantization or "").strip().lower() == str(self._forward_quantization or "").strip().lower():
                     self._bwd_codec = self._fwd_codec
                 else:
@@ -1228,6 +1239,8 @@ class MessageManager(Observer):
             "uniform_asymmetric_uint8",
             "top_k_sparsity",
             "random_top_k_sparsity",
+            "paper_top_k_sparsity",
+            "split_fc",
             "autoencoder",
             "random_projection",
             "low_rank_pca_projection",

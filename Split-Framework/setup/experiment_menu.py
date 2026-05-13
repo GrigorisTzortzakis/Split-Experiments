@@ -133,6 +133,7 @@ QUANTIZATION_OPTIONS: List[Tuple[str, str]] = [
     ("top_k", "top_k"),
     ("random_top_k", "random_top_k"),
     ("paper_top_k", "paper_top_k"),
+    ("split_fc", "split_fc"),
     ("random_projection", "random_projection"),
     ("low_rank_pca", "low_rank_pca"),
 ]
@@ -151,7 +152,7 @@ COMM_METHODS_BY_MODE: Dict[str, Tuple[str, ...]] = {
         "non_uniform_mlaw",
     ),
     "Truncation": ("truncation_int",),
-    "sparsity": ("top_k", "random_top_k", "paper_top_k"),
+    "sparsity": ("top_k", "random_top_k", "paper_top_k", "split_fc"),
     "dimensionality_reduction": ("random_projection", "low_rank_pca"),
 }
 
@@ -656,7 +657,7 @@ class ExperimentMenu:
         backward_kind, _backward_addon = self._split_quantization_pipeline(self.defaults.get("backward_quantization"))
         kind = self._default_quantization_label("forward_quantization") if forward_kind else self._default_quantization_label("backward_quantization")
         reduction_mode = "arithmetic_conversion"
-        if kind in {"top_k", "random_top_k"}:
+        if kind in {"top_k", "random_top_k", "paper_top_k", "split_fc"}:
             reduction_mode = "sparsity"
         elif kind in {"random_projection", "autoencoder", "low_rank_pca"}:
             reduction_mode = "dimensionality_reduction"
@@ -679,8 +680,8 @@ class ExperimentMenu:
         forward_kind, _forward_addon = self._split_quantization_pipeline(self.defaults.get("forward_quantization"))
         backward_kind, _backward_addon = self._split_quantization_pipeline(self.defaults.get("backward_quantization"))
         kind = self._default_quantization_label("forward_quantization") if forward_kind else self._default_quantization_label("backward_quantization")
-        current = int(_safe_int(self.defaults.get("quantization_bits"), 32 if kind in {"top_k", "random_top_k", "paper_top_k", "random_projection", "autoencoder", "low_rank_pca"} else 8))
-        if kind in {"top_k", "random_top_k", "paper_top_k", "random_projection", "autoencoder", "low_rank_pca"}:
+        current = int(_safe_int(self.defaults.get("quantization_bits"), 32 if kind in {"top_k", "random_top_k", "paper_top_k", "split_fc", "random_projection", "autoencoder", "low_rank_pca"} else 8))
+        if kind in {"top_k", "random_top_k", "paper_top_k", "split_fc", "random_projection", "autoencoder", "low_rank_pca"}:
             if current not in {8, 16, 32}:
                 current = 32
         elif current not in {2, 3, 4, 6, 8}:
@@ -793,6 +794,8 @@ class ExperimentMenu:
             "paper_top_k": "paper_top_k",
             "paper_topk": "paper_top_k",
             "paper_top_k_sparsity": "paper_top_k",
+            "split_fc": "split_fc",
+            "splitfc": "split_fc",
             "random_projection": "random_projection",
             "autoencoder": "random_projection",
             "low_rank_pca": "low_rank_pca",
@@ -1152,6 +1155,7 @@ class ExperimentMenu:
 
         selected_methods = self._selected_pipeline_methods()
         uses_sparsity = bool(selected_methods & {"top_k", "random_top_k", "paper_top_k"})
+        uses_split_fc_ratio = bool(selected_methods & {"split_fc"})
         uses_dimensionality_ratio = bool(selected_methods & {"random_projection", "autoencoder", "low_rank_pca"})
         is_sparsity = reduction_mode == "sparsity"
         is_dimensionality_reduction = reduction_mode == "dimensionality_reduction"
@@ -1171,14 +1175,14 @@ class ExperimentMenu:
         self.sparsity_k_combo.configure(state=("readonly" if uses_sparsity else "disabled"))
         if self.sparsity_k_var.get() not in sparsity_values:
             self.sparsity_k_var.set(sparsity_values[0])
-        self.dimensionality_reduction_ratio_combo.configure(state=("readonly" if uses_dimensionality_ratio else "disabled"))
+        self.dimensionality_reduction_ratio_combo.configure(state=("readonly" if (uses_dimensionality_ratio or uses_split_fc_ratio) else "disabled"))
         for widget in self.sparsity_k_widgets:
             if uses_sparsity:
                 widget.grid()
             else:
                 widget.grid_remove()
         for widget in self.dimensionality_reduction_ratio_widgets:
-            if uses_dimensionality_ratio:
+            if uses_dimensionality_ratio or uses_split_fc_ratio:
                 widget.grid()
             else:
                 widget.grid_remove()
@@ -1247,6 +1251,7 @@ class ExperimentMenu:
             direction = self.comm_direction_map[self.comm_direction_var.get()]
             selected_methods = self._selected_pipeline_methods()
             uses_sparsity = bool(selected_methods & {"top_k", "random_top_k", "paper_top_k"})
+            uses_split_fc_ratio = bool(selected_methods & {"split_fc"})
             uses_dimensionality_ratio = bool(selected_methods & {"random_projection", "autoencoder", "low_rank_pca"})
             bits_value = self.quantization_bits_map[self.quantization_bits_var.get()]
             command.extend(["--quantization-bits", str(bits_value)])
@@ -1256,6 +1261,9 @@ class ExperimentMenu:
             if uses_dimensionality_ratio:
                 ratio_value = self.dimensionality_reduction_ratio_map[self.dimensionality_reduction_ratio_var.get()]
                 command.extend(["--dimensionality-reduction-ratio", str(ratio_value)])
+            if uses_split_fc_ratio:
+                ratio_value = self.dimensionality_reduction_ratio_map[self.dimensionality_reduction_ratio_var.get()]
+                command.extend(["--split-fc-reduction-ratio", str(1.0 / max(ratio_value, 1e-8))])
             if reduction_mode not in {"sparsity", "dimensionality_reduction"}:
                 granularity_value = self.quantization_granularity_map[self.quantization_granularity_var.get()]
                 command.extend(["--quantization-granularity", granularity_value])
@@ -1302,9 +1310,12 @@ class ExperimentMenu:
             backward_pipeline = self._compose_quantization_pipeline(self.backward_quantization_var.get(), self.backward_quantization_addon_var.get())
             selected_methods = self._selected_pipeline_methods()
             uses_sparsity = bool(selected_methods & {"top_k", "random_top_k", "paper_top_k"})
+            uses_split_fc_ratio = bool(selected_methods & {"split_fc"})
             uses_dimensionality_ratio = bool(selected_methods & {"random_projection", "autoencoder", "low_rank_pca"})
             if reduction_mode == "sparsity" or uses_sparsity:
                 summary.append(f"{self.quantization_bits_var.get()} {self.sparsity_k_var.get()} {forward_pipeline} {reduction_mode}:{direction}")
+            elif uses_split_fc_ratio:
+                summary.append(f"{self.quantization_bits_var.get()} {self.dimensionality_reduction_ratio_var.get()} {forward_pipeline} comparison_papers:{direction}")
             elif reduction_mode == "dimensionality_reduction" or uses_dimensionality_ratio:
                 if uses_dimensionality_ratio:
                     summary.append(f"{self.quantization_bits_var.get()} {self.dimensionality_reduction_ratio_var.get()} {forward_pipeline} {reduction_mode}:{direction}")
@@ -1368,6 +1379,7 @@ class ExperimentMenu:
                 errors.append("Backward add-on method is invalid.")
             selected_methods = self._selected_pipeline_methods()
             uses_sparsity = bool(selected_methods & {"top_k", "random_top_k", "paper_top_k"})
+            uses_split_fc_ratio = bool(selected_methods & {"split_fc"})
             uses_dimensionality_ratio = bool(selected_methods & {"random_projection", "autoencoder", "low_rank_pca"})
             if uses_sparsity:
                 if self.sparsity_k_var.get() not in self.sparsity_k_map:
@@ -1377,7 +1389,7 @@ class ExperimentMenu:
                     and self.sparsity_k_var.get() == "1%"
                 ):
                     errors.append("Random Top-k and Paper Top-k support 5%, 10%, 25%, or 50% only.")
-            if uses_dimensionality_ratio:
+            if uses_dimensionality_ratio or uses_split_fc_ratio:
                 if self.dimensionality_reduction_ratio_var.get() not in self.dimensionality_reduction_ratio_map:
                     errors.append("Reduced dimension must be one of the supported percentages.")
 

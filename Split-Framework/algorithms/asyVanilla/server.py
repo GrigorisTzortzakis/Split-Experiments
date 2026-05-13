@@ -7,6 +7,7 @@ import sys
 
 sys.path.extend("../../../")
 
+from compression.comparison_papers.paper_top_k import transfer_paper_top_k_cache_id
 from runtime.exports.log import Log
 
 
@@ -60,7 +61,7 @@ class SplitNNServer():
         self.loss.backward(retain_graph=True)
         # self.optimizer.step()
         # self.log.info(self.acts.grad.shape)
-        return self.acts.grad
+        return transfer_paper_top_k_cache_id(self.acts, self.acts.grad)
 
     def reset_local_params(self):
         self.total = 0

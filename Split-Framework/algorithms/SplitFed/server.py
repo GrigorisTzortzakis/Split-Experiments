@@ -9,6 +9,7 @@ import torch.optim as optim
 
 sys.path.extend("../../../")
 
+from compression.comparison_papers.paper_top_k import transfer_paper_top_k_cache_id
 from runtime.exports.log import Log
 
 
@@ -77,7 +78,7 @@ class SplitNNServer():
         self.server_optimizer_state_dict[client_id] = copy.deepcopy(self.optimizer.state_dict())
 
     def forward_pass(self, acts, labels):
-        self.acts = acts.detach().clone().requires_grad_(True)
+        self.acts = transfer_paper_top_k_cache_id(acts, acts.detach().clone().requires_grad_(True))
         self.optimizer.zero_grad()
         self.acts.retain_grad()
 
@@ -91,7 +92,7 @@ class SplitNNServer():
     def backward_pass(self):
         self.loss.backward(retain_graph=True)
         self.optimizer.step()
-        return self.acts.grad
+        return transfer_paper_top_k_cache_id(self.acts, self.acts.grad)
 
     def federate_server_models(self):
         if not self.server_model_dict:

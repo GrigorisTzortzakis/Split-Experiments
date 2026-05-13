@@ -1740,6 +1740,9 @@ def _basic_label_from_path(log_path: Path) -> str:
     match = re.search(r"/sparsity/paper_top_k/(\d+)pct/", rel)
     if match:
         return f"paper top-k {match.group(1)}%"
+    match = re.search(r"/comparison_papers/split_fc/(\d+)pct/", rel)
+    if match:
+        return f"split fc {match.group(1)}%"
     if "/arithmetic_conversion/int/" in rel or "/arithmetic_conversion/int8/" in rel:
         return "int"
     if "/arithmetic_conversion/float/" in rel or "/arithmetic_conversion/fp8/" in rel:

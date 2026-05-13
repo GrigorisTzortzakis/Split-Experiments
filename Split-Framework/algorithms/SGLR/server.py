@@ -8,6 +8,7 @@ import random
 
 sys.path.extend("../../../")
 
+from compression.comparison_papers.paper_top_k import transfer_paper_top_k_cache_id
 from runtime.exports.log import Log
 
 
@@ -90,7 +91,7 @@ class SplitNNServer():
         self.loss.backward(retain_graph=True)
         # self.optimizer.step()
         # self.log.info(self.acts.grad.shape)
-        return self.acts.grad
+        return transfer_paper_top_k_cache_id(self.acts, self.acts.grad)
 
     def check_whether_all_receive(self):
         # self.log.info("self.client_model_uploaded_number, self.client_number :{}, {}".format(

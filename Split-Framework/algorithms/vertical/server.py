@@ -7,6 +7,7 @@ import sys
 
 sys.path.extend("../../../")
 
+from compression.comparison_papers.paper_top_k import transfer_paper_top_k_cache_id
 from runtime.exports.log import Log
 
 

@@ -7,6 +7,7 @@ import sys
 
 sys.path.extend("../../../")
 
+from compression.comparison_papers.paper_top_k import transfer_paper_top_k_cache_id
 from runtime.exports.log import Log
 
 class SplitNNServer():
@@ -70,7 +71,7 @@ class SplitNNServer():
     def backward_pass(self):
         self.loss.backward(retain_graph=True)
         self.optimizer.step()
-        return self.acts.grad
+        return transfer_paper_top_k_cache_id(self.acts, self.acts.grad)
 
     def validation_over(self):
         # not precise estimation of validation loss

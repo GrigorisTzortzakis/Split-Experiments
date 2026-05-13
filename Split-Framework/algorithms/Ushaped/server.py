@@ -9,6 +9,7 @@ import sys
 
 sys.path.extend("../../../")
 
+from compression.comparison_papers.paper_top_k import transfer_paper_top_k_cache_id
 from runtime.exports.log import Log
 
 class SplitNNServer():
@@ -47,7 +48,7 @@ class SplitNNServer():
     def backward_pass(self, grad):
         self.acts2.backward(grad)
         self.optimizer.step()
-        return self.acts.grad
+        return transfer_paper_top_k_cache_id(self.acts, self.acts.grad)
 
     def validation_over(self):
         self.active_node = (self.active_node % self.MAX_RANK) + 1

@@ -1,14 +1,31 @@
 from __future__ import annotations
 
-from collections import deque
 from dataclasses import dataclass, field
-from typing import Any, Deque, Dict, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 import torch
 
 from compression.sparsity.top_k import _normalize_k_percent, _storage_dtype, _store_indices
 
 Payload = Dict[str, Any]
+PAPER_TOP_K_CACHE_ID_ATTR = "_paper_top_k_cache_id"
+
+
+def get_paper_top_k_cache_id(tensor: Any) -> Optional[str]:
+    if not isinstance(tensor, torch.Tensor):
+        return None
+    cache_id = getattr(tensor, PAPER_TOP_K_CACHE_ID_ATTR, None)
+    return None if cache_id is None else str(cache_id)
+
+
+def set_paper_top_k_cache_id(tensor: Any, cache_id: Optional[str]) -> Any:
+    if isinstance(tensor, torch.Tensor) and cache_id:
+        setattr(tensor, PAPER_TOP_K_CACHE_ID_ATTR, str(cache_id))
+    return tensor
+
+
+def transfer_paper_top_k_cache_id(source: Any, target: Any) -> Any:
+    return set_paper_top_k_cache_id(target, get_paper_top_k_cache_id(source))
 
 
 @dataclass
@@ -19,7 +36,6 @@ class PaperTopKSparsityCodec:
     storage_bits: int = 32
     _cache_counter: int = field(default=0, init=False, repr=False)
     _selection_cache: Dict[str, Dict[str, Any]] = field(default_factory=dict, init=False, repr=False)
-    _pending_gradient_cache_ids: Deque[str] = field(default_factory=deque, init=False, repr=False)
     _generator: Optional[torch.Generator] = field(default=None, init=False, repr=False)
 
     def __post_init__(self) -> None:
@@ -52,14 +68,11 @@ class PaperTopKSparsityCodec:
         self._cache_counter += 1
         return cache_id
 
-    def _select_indices(self, row: torch.Tensor, *, keep_count: int, randomized: bool, generator: Optional[torch.Generator]) -> torch.Tensor:
+    def _select_indices(self, row: torch.Tensor, *, keep_count: int, generator: Optional[torch.Generator]) -> torch.Tensor:
         if keep_count <= 0:
             return torch.empty(0, dtype=torch.int64)
 
         top_indices = torch.topk(row.abs(), k=keep_count, largest=True, sorted=False).indices.to(dtype=torch.int64)
-        if not randomized or keep_count >= int(row.numel()):
-            return top_indices
-
         alpha = self._normalized_alpha()
         if alpha <= 0.0:
             return top_indices
@@ -91,21 +104,19 @@ class PaperTopKSparsityCodec:
 
         return torch.tensor(selected, dtype=torch.int64)
 
-    def _cache_selection(self, *, cache_id: str, indices: torch.Tensor, shape: Tuple[int, ...], flat_dim: int, queue_for_backward_encode: bool) -> None:
+    def _cache_selection(self, *, cache_id: str, indices: torch.Tensor, shape: Tuple[int, ...], flat_dim: int) -> None:
         self._selection_cache[cache_id] = {
             "indices": indices.to(device="cpu"),
             "shape": shape,
             "flat_dim": int(flat_dim),
         }
-        if queue_for_backward_encode:
-            self._pending_gradient_cache_ids.append(cache_id)
 
     def encode(self, x: torch.Tensor) -> Payload:
         if not isinstance(x, torch.Tensor):
             raise TypeError(f"encode expects a torch.Tensor, got {type(x)!r}")
 
-        if self._pending_gradient_cache_ids:
-            cache_id = self._pending_gradient_cache_ids.popleft()
+        cache_id = get_paper_top_k_cache_id(x)
+        if cache_id is not None:
             cached = self._selection_cache.get(cache_id)
             if cached is None:
                 raise KeyError(f"Missing cached forward selection for {cache_id!r}")
@@ -128,12 +139,11 @@ class PaperTopKSparsityCodec:
         matrix, shape, flat_dim = self._matrix_view(x)
         keep_count = self._keep_count(flat_dim)
         generator = self._generator
-        randomized = bool(torch.is_grad_enabled())
 
         index_rows = []
         value_rows = []
         for row in matrix:
-            row_indices = self._select_indices(row.to(dtype=torch.float32), keep_count=keep_count, randomized=randomized, generator=generator)
+            row_indices = self._select_indices(row.to(dtype=torch.float32), keep_count=keep_count, generator=generator)
             index_rows.append(row_indices)
             value_rows.append(row.index_select(0, row_indices).to(dtype=_storage_dtype(self.storage_bits)))
 
@@ -147,18 +157,16 @@ class PaperTopKSparsityCodec:
             "shape": shape,
             "k_percent": _normalize_k_percent(self.k_percent),
             "alpha": self._normalized_alpha(),
-            "training_randomized": randomized,
+            "training_randomized": True,
         }
-        if randomized:
-            cache_id = self._next_cache_id()
-            payload["cache_id"] = cache_id
-            self._cache_selection(
-                cache_id=cache_id,
-                indices=indices,
-                shape=shape,
-                flat_dim=flat_dim,
-                queue_for_backward_encode=False,
-            )
+        cache_id = self._next_cache_id()
+        payload["cache_id"] = cache_id
+        self._cache_selection(
+            cache_id=cache_id,
+            indices=indices,
+            shape=shape,
+            flat_dim=flat_dim,
+        )
         return payload
 
     def decode(
@@ -196,9 +204,8 @@ class PaperTopKSparsityCodec:
                     indices=indices,
                     shape=shape,
                     flat_dim=int(matrix_shape[1]),
-                    queue_for_backward_encode=True,
                 )
-            return out.reshape(shape)
+            return set_paper_top_k_cache_id(out.reshape(shape), str(cache_id) if cache_id is not None else None)
 
         cache_id = str(payload.get("cache_id") or "")
         if not cache_id:

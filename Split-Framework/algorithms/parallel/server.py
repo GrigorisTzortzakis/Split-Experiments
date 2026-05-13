@@ -9,6 +9,7 @@ import torch.optim as optim
 
 sys.path.extend("../../../")
 
+from compression.comparison_papers.paper_top_k import transfer_paper_top_k_cache_id
 from runtime.exports.log import Log
 
 
@@ -79,7 +80,7 @@ class SplitNNServer():
         self.server_optimizer_state_dict[client_id] = copy.deepcopy(self.optimizer.state_dict())
 
     def forward_pass(self, acts, labels):
-        self.acts = acts.detach().clone().requires_grad_(True)
+        self.acts = transfer_paper_top_k_cache_id(acts, acts.detach().clone().requires_grad_(True))
         self.optimizer.zero_grad()
         self.acts.retain_grad()
 
@@ -94,7 +95,7 @@ class SplitNNServer():
         self.loss.backward(retain_graph=True)
         self.optimizer.step()
         # self.log.info(self.acts.grad.shape)
-        return self.acts.grad
+        return transfer_paper_top_k_cache_id(self.acts, self.acts.grad)
 
     def process_client_batch(self, client_id, acts, labels, client_phase):
         self.load_client_state(client_id, client_phase)
@@ -153,7 +154,7 @@ class SplitNNServer():
         self.optimizer.zero_grad()
         for _client_id, acts, labels, _phase in client_batches:
             if isinstance(acts, torch.Tensor) and not acts.requires_grad:
-                acts = acts.detach().requires_grad_(True)
+                acts = transfer_paper_top_k_cache_id(acts, acts.detach().requires_grad_(True))
             prepared_acts.append(acts)
             labels_list.append(labels)
             batch_sizes.append(labels.size(0))
@@ -180,6 +181,7 @@ class SplitNNServer():
             local_correct = predictions.eq(labels).sum().item()
             local_loss = self.criterion(local_logits, labels).item()
             local_grads = None if combined_grads is None else combined_grads[start_idx:end_idx]
+            local_grads = transfer_paper_top_k_cache_id(prepared_acts[len(results)], local_grads)
             results[client_id] = (local_grads, (local_total, local_correct, local_loss))
             start_idx = end_idx
 

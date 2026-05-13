@@ -142,6 +142,8 @@ def main():
     parser.add_argument("--quantization-group-size", dest="quantization_group_size", type=int, default=None)
     parser.add_argument("--sparsity-k", dest="sparsity_k", type=float, default=None)
     parser.add_argument("--paper-top-k-alpha", dest="paper_top_k_alpha", type=float, default=None)
+    parser.add_argument("--split-fc-reduction-ratio", dest="split_fc_reduction_ratio", type=float, default=None)
+    parser.add_argument("--split-fc-endpoint-levels", dest="split_fc_endpoint_levels", type=int, default=None)
     parser.add_argument("--dimensionality-reduction-ratio", dest="dimensionality_reduction_ratio", type=float, default=None)
     parser.add_argument("--truncation-scale", dest="truncation_scale", type=float, default=None)
     parser.add_argument("--forward-truncation-scale", dest="forward_truncation_scale", type=float, default=None)
@@ -210,6 +212,10 @@ def main():
         args["sparsity_k"] = float(cli_args.sparsity_k)
     if cli_args.paper_top_k_alpha is not None:
         args["paper_top_k_alpha"] = float(cli_args.paper_top_k_alpha)
+    if cli_args.split_fc_reduction_ratio is not None:
+        args["split_fc_reduction_ratio"] = float(cli_args.split_fc_reduction_ratio)
+    if cli_args.split_fc_endpoint_levels is not None:
+        args["split_fc_endpoint_levels"] = int(cli_args.split_fc_endpoint_levels)
     if cli_args.dimensionality_reduction_ratio is not None:
         args["dimensionality_reduction_ratio"] = float(cli_args.dimensionality_reduction_ratio)
     if cli_args.truncation_scale is not None:
@@ -348,6 +354,7 @@ def main():
     #   results/logs/<algorithm>/<model>/baseline/
     #   results/logs/<algorithm>/<model>/reduce_comm_cost/quantization/<technique>/<direction>/<variant>/
     #   results/logs/<algorithm>/<model>/reduce_comm_cost/sparsity/
+    #   results/logs/<algorithm>/<model>/reduce_comm_cost/comparison_papers/
     #   results/logs/<algorithm>/<model>/reduce_comm_cost/dimensionality_reduction/
     quantize_forward = bool(args["quantize_forward"]) if args["quantize_forward"] is not None else bool(args["quantize_activations"]) if args["quantize_activations"] is not None else False
     quantize_backward = bool(args["quantize_backward"]) if args["quantize_backward"] is not None else False
@@ -359,6 +366,7 @@ def main():
     os.makedirs(baseline_root, exist_ok=True)
     os.makedirs(reduce_root / "quantization", exist_ok=True)
     os.makedirs(reduce_root / "sparsity", exist_ok=True)
+    os.makedirs(reduce_root / "comparison_papers", exist_ok=True)
     os.makedirs(reduce_root / "dimensionality_reduction", exist_ok=True)
 
     if quantize_forward or quantize_backward:
@@ -444,6 +452,14 @@ def main():
             if kind in ("paper_top_k", "paper_topk", "paper_top_k_sparsity"):
                 random_percent = _normalize_sparsity_percent(args.get("sparsity_k"), 5)
                 return ("sparsity", ("paper_top_k", f"{random_percent}pct"))
+            if kind in ("split_fc", "splitfc"):
+                split_fc_ratio = args.get("split_fc_reduction_ratio")
+                try:
+                    ratio = float(split_fc_ratio)
+                except Exception:
+                    ratio = 16.0
+                keep_pct = int(round(100.0 / max(ratio, 1.0)))
+                return ("comparison_papers", ("split_fc", f"{keep_pct}pct"))
             if kind in ("random_projection", "autoencoder"):
                 return ("dimensionality_reduction", ("random_projection", f"{dimensionality_ratio_pct}pct"))
             if kind in ("low_rank_pca", "low_rank_projection", "pca_projection", "pca", "low_rank"):
@@ -493,6 +509,8 @@ def main():
 
         if reduction_family == "sparsity":
             results_dir = reduce_root / "sparsity"
+        elif reduction_family == "comparison_papers":
+            results_dir = reduce_root / "comparison_papers"
         elif reduction_family == "combined":
             results_dir = reduce_root / "combined"
         else:
