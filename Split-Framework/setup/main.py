@@ -451,7 +451,7 @@ def main():
                 return ("sparsity", ("random_top_k", f"{random_percent}pct"))
             if kind in ("paper_top_k", "paper_topk", "paper_top_k_sparsity"):
                 random_percent = _normalize_sparsity_percent(args.get("sparsity_k"), 5)
-                return ("sparsity", ("paper_top_k", f"{random_percent}pct"))
+                return ("comparison_papers", ("paper_top_k", f"{random_percent}pct"))
             if kind in ("split_fc", "splitfc"):
                 split_fc_ratio = args.get("split_fc_reduction_ratio")
                 try:
@@ -460,8 +460,12 @@ def main():
                     ratio = 16.0
                 keep_pct = int(round(100.0 / max(ratio, 1.0)))
                 return ("comparison_papers", ("split_fc", f"{keep_pct}pct"))
-            if kind in ("random_projection", "autoencoder"):
+            if kind in ("random_projection",):
                 return ("dimensionality_reduction", ("random_projection", f"{dimensionality_ratio_pct}pct"))
+            if kind in ("autoencoder",):
+                return ("dimensionality_reduction", ("autoencoder", f"{dimensionality_ratio_pct}pct"))
+            if kind in ("autoencoder_paper", "autoencoder-paper"):
+                return ("comparison_papers", ("autoencoder_paper",))
             if kind in ("low_rank_pca", "low_rank_projection", "pca_projection", "pca", "low_rank"):
                 return ("dimensionality_reduction", ("low_rank_pca", f"{dimensionality_ratio_pct}pct"))
             if kind in ("fp8_e4m3", "float8_e4m3", "e4m3", "float8", "float"):

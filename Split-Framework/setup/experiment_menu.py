@@ -95,6 +95,7 @@ COMM_REDUCTION_OPTIONS: List[Tuple[str, str]] = [
     ("codeword", "codeword"),
     ("Truncation", "Truncation"),
     ("sparsity", "sparsity"),
+    ("comparison_papers", "comparison_papers"),
     ("dimensionality_reduction", "dimensionality_reduction"),
 ]
 COMM_DIRECTION_OPTIONS: List[Tuple[str, str]] = [
@@ -135,7 +136,9 @@ QUANTIZATION_OPTIONS: List[Tuple[str, str]] = [
     ("paper_top_k", "paper_top_k"),
     ("split_fc", "split_fc"),
     ("random_projection", "random_projection"),
+    ("autoencoder", "autoencoder"),
     ("low_rank_pca", "low_rank_pca"),
+    ("autoencoder_paper", "autoencoder_paper"),
 ]
 PIPELINE_ADDON_OPTIONS: List[Tuple[str, str]] = [("none", "none"), *QUANTIZATION_OPTIONS]
 QUANTIZATION_GRANULARITY_OPTIONS: List[Tuple[str, str]] = [
@@ -152,8 +155,9 @@ COMM_METHODS_BY_MODE: Dict[str, Tuple[str, ...]] = {
         "non_uniform_mlaw",
     ),
     "Truncation": ("truncation_int",),
-    "sparsity": ("top_k", "random_top_k", "paper_top_k", "split_fc"),
-    "dimensionality_reduction": ("random_projection", "low_rank_pca"),
+    "sparsity": ("top_k", "random_top_k"),
+    "comparison_papers": ("paper_top_k", "split_fc", "autoencoder_paper"),
+    "dimensionality_reduction": ("random_projection", "autoencoder", "low_rank_pca"),
 }
 
 
@@ -420,6 +424,16 @@ class ExperimentMenu:
             self.backward_quantization_addon_var.get(),
         }
 
+    def _selected_pipeline_addons(self) -> Set[str]:
+        return {
+            addon
+            for addon in {
+                self.forward_quantization_addon_var.get(),
+                self.backward_quantization_addon_var.get(),
+            }
+            if addon not in {"", "none"}
+        }
+
     def _build_mode_selection_map(self) -> Dict[str, Tuple[str, Optional[str]]]:
         options: Dict[str, Tuple[str, Optional[str]]] = {"none": ("none", None)}
         for label, value in COMM_REDUCTION_OPTIONS:
@@ -657,8 +671,10 @@ class ExperimentMenu:
         backward_kind, _backward_addon = self._split_quantization_pipeline(self.defaults.get("backward_quantization"))
         kind = self._default_quantization_label("forward_quantization") if forward_kind else self._default_quantization_label("backward_quantization")
         reduction_mode = "arithmetic_conversion"
-        if kind in {"top_k", "random_top_k", "paper_top_k", "split_fc"}:
+        if kind in {"top_k", "random_top_k"}:
             reduction_mode = "sparsity"
+        elif kind in {"paper_top_k", "split_fc", "autoencoder_paper"}:
+            reduction_mode = "comparison_papers"
         elif kind in {"random_projection", "autoencoder", "low_rank_pca"}:
             reduction_mode = "dimensionality_reduction"
         elif kind in {"uniform", "non_uniform_loyd", "non_uniform_mlaw"}:
@@ -677,12 +693,19 @@ class ExperimentMenu:
         return "forward"
 
     def _default_quantization_bits_label(self) -> str:
-        forward_kind, _forward_addon = self._split_quantization_pipeline(self.defaults.get("forward_quantization"))
-        backward_kind, _backward_addon = self._split_quantization_pipeline(self.defaults.get("backward_quantization"))
+        forward_kind, forward_addon = self._split_quantization_pipeline(self.defaults.get("forward_quantization"))
+        backward_kind, backward_addon = self._split_quantization_pipeline(self.defaults.get("backward_quantization"))
         kind = self._default_quantization_label("forward_quantization") if forward_kind else self._default_quantization_label("backward_quantization")
+        has_addon = (forward_addon not in {"", "none"}) or (backward_addon not in {"", "none"})
         current = int(_safe_int(self.defaults.get("quantization_bits"), 32 if kind in {"top_k", "random_top_k", "paper_top_k", "split_fc", "random_projection", "autoencoder", "low_rank_pca"} else 8))
         if kind in {"top_k", "random_top_k", "paper_top_k", "split_fc", "random_projection", "autoencoder", "low_rank_pca"}:
-            if current not in {8, 16, 32}:
+            if kind == "split_fc" and not has_addon:
+                allowed_bits = {8, 16, 32}
+                current = current if current in allowed_bits else 32
+            elif has_addon:
+                allowed_bits = {2, 3, 4, 6, 8}
+                current = current if current in allowed_bits else 8
+            else:
                 current = 32
         elif current not in {2, 3, 4, 6, 8}:
             current = 8
@@ -797,7 +820,9 @@ class ExperimentMenu:
             "split_fc": "split_fc",
             "splitfc": "split_fc",
             "random_projection": "random_projection",
-            "autoencoder": "random_projection",
+            "autoencoder": "autoencoder",
+            "autoencoder_paper": "autoencoder_paper",
+            "autoencoder-paper": "autoencoder_paper",
             "low_rank_pca": "low_rank_pca",
             "low_rank_projection": "low_rank_pca",
             "pca_projection": "low_rank_pca",
@@ -1154,22 +1179,34 @@ class ExperimentMenu:
                 self.backward_quantization_var.set(allowed_methods[0])
 
         selected_methods = self._selected_pipeline_methods()
+        selected_addons = self._selected_pipeline_addons()
         uses_sparsity = bool(selected_methods & {"top_k", "random_top_k", "paper_top_k"})
         uses_split_fc_ratio = bool(selected_methods & {"split_fc"})
         uses_dimensionality_ratio = bool(selected_methods & {"random_projection", "autoencoder", "low_rank_pca"})
         is_sparsity = reduction_mode == "sparsity"
+        is_comparison_papers = reduction_mode == "comparison_papers"
         is_dimensionality_reduction = reduction_mode == "dimensionality_reduction"
-        if is_sparsity or is_dimensionality_reduction:
-            bit_values = [label for label, value in QUANTIZATION_BITS_OPTIONS if int(value) in {8, 16, 32}]
-            self.quantization_bits_combo.configure(values=bit_values, state="readonly")
+        uses_explicit_bit_width = bool(selected_addons) or uses_split_fc_ratio or reduction_mode in {"arithmetic_conversion", "codeword", "Truncation"}
+        if is_sparsity or is_comparison_papers or is_dimensionality_reduction:
+            if uses_split_fc_ratio and not selected_addons:
+                allowed_bit_set = {8, 16, 32}
+                default_bit_label = "32bit"
+            elif selected_addons:
+                allowed_bit_set = {2, 3, 4, 6, 8}
+                default_bit_label = "8bit"
+            else:
+                allowed_bit_set = {32}
+                default_bit_label = "32bit"
+            bit_values = [label for label, value in QUANTIZATION_BITS_OPTIONS if int(value) in allowed_bit_set]
+            self.quantization_bits_combo.configure(values=bit_values, state=("readonly" if uses_explicit_bit_width else "disabled"))
             if self.quantization_bits_var.get() not in bit_values:
-                self.quantization_bits_var.set("32bit")
+                self.quantization_bits_var.set(default_bit_label)
         else:
             bit_values = [label for label, value in QUANTIZATION_BITS_OPTIONS if int(value) in {2, 3, 4, 6, 8}]
             self.quantization_bits_combo.configure(values=bit_values, state="readonly")
             if self.quantization_bits_var.get() not in bit_values:
                 self.quantization_bits_var.set("8bit")
-        self.quantization_granularity_combo.configure(state=("disabled" if (is_sparsity or is_dimensionality_reduction) else "readonly"))
+        self.quantization_granularity_combo.configure(state=("disabled" if (is_sparsity or is_comparison_papers or is_dimensionality_reduction) else "readonly"))
         sparsity_values = [label for label, _value in SPARSITY_K_OPTIONS if not ({"random_top_k", "paper_top_k"} & selected_methods) or label != "1%"]
         self.sparsity_k_combo.configure(values=sparsity_values)
         self.sparsity_k_combo.configure(state=("readonly" if uses_sparsity else "disabled"))
@@ -1250,11 +1287,14 @@ class ExperimentMenu:
         if reduction_mode != "none":
             direction = self.comm_direction_map[self.comm_direction_var.get()]
             selected_methods = self._selected_pipeline_methods()
+            selected_addons = self._selected_pipeline_addons()
             uses_sparsity = bool(selected_methods & {"top_k", "random_top_k", "paper_top_k"})
             uses_split_fc_ratio = bool(selected_methods & {"split_fc"})
             uses_dimensionality_ratio = bool(selected_methods & {"random_projection", "autoencoder", "low_rank_pca"})
-            bits_value = self.quantization_bits_map[self.quantization_bits_var.get()]
-            command.extend(["--quantization-bits", str(bits_value)])
+            uses_explicit_bit_width = bool(selected_addons) or uses_split_fc_ratio or reduction_mode in {"arithmetic_conversion", "codeword", "Truncation"}
+            if uses_explicit_bit_width:
+                bits_value = self.quantization_bits_map[self.quantization_bits_var.get()]
+                command.extend(["--quantization-bits", str(bits_value)])
             if uses_sparsity:
                 sparsity_value = self.sparsity_k_map[self.sparsity_k_var.get()]
                 command.extend(["--sparsity-k", str(sparsity_value)])
@@ -1309,18 +1349,23 @@ class ExperimentMenu:
             forward_pipeline = self._compose_quantization_pipeline(self.forward_quantization_var.get(), self.forward_quantization_addon_var.get())
             backward_pipeline = self._compose_quantization_pipeline(self.backward_quantization_var.get(), self.backward_quantization_addon_var.get())
             selected_methods = self._selected_pipeline_methods()
+            selected_addons = self._selected_pipeline_addons()
             uses_sparsity = bool(selected_methods & {"top_k", "random_top_k", "paper_top_k"})
             uses_split_fc_ratio = bool(selected_methods & {"split_fc"})
             uses_dimensionality_ratio = bool(selected_methods & {"random_projection", "autoencoder", "low_rank_pca"})
-            if reduction_mode == "sparsity" or uses_sparsity:
-                summary.append(f"{self.quantization_bits_var.get()} {self.sparsity_k_var.get()} {forward_pipeline} {reduction_mode}:{direction}")
+            uses_explicit_bit_width = bool(selected_addons) or uses_split_fc_ratio or reduction_mode in {"arithmetic_conversion", "codeword", "Truncation"}
+            if reduction_mode == "sparsity" or (reduction_mode == "comparison_papers" and uses_sparsity):
+                prefix = f"{self.quantization_bits_var.get()} " if uses_explicit_bit_width else ""
+                summary.append(f"{prefix}{self.sparsity_k_var.get()} {forward_pipeline} {reduction_mode}:{direction}")
             elif uses_split_fc_ratio:
                 summary.append(f"{self.quantization_bits_var.get()} {self.dimensionality_reduction_ratio_var.get()} {forward_pipeline} comparison_papers:{direction}")
             elif reduction_mode == "dimensionality_reduction" or uses_dimensionality_ratio:
                 if uses_dimensionality_ratio:
-                    summary.append(f"{self.quantization_bits_var.get()} {self.dimensionality_reduction_ratio_var.get()} {forward_pipeline} {reduction_mode}:{direction}")
+                    prefix = f"{self.quantization_bits_var.get()} " if uses_explicit_bit_width else ""
+                    summary.append(f"{prefix}{self.dimensionality_reduction_ratio_var.get()} {forward_pipeline} {reduction_mode}:{direction}")
                 else:
-                    summary.append(f"{self.quantization_bits_var.get()} {forward_pipeline} {reduction_mode}:{direction}")
+                    prefix = f"{self.quantization_bits_var.get()} " if uses_explicit_bit_width else ""
+                    summary.append(f"{prefix}{forward_pipeline} {reduction_mode}:{direction}")
             else:
                 pipeline_text = forward_pipeline if direction != "backward" else backward_pipeline
                 summary.append(f"{self.quantization_bits_var.get()} {self.quantization_granularity_var.get()} {pipeline_text} {reduction_mode}:{direction}")
@@ -1381,6 +1426,8 @@ class ExperimentMenu:
             uses_sparsity = bool(selected_methods & {"top_k", "random_top_k", "paper_top_k"})
             uses_split_fc_ratio = bool(selected_methods & {"split_fc"})
             uses_dimensionality_ratio = bool(selected_methods & {"random_projection", "autoencoder", "low_rank_pca"})
+            if "autoencoder_paper" in selected_methods:
+                errors.append("autoencoder_paper is listed separately in the menu, but its runtime wiring is not implemented yet.")
             if uses_sparsity:
                 if self.sparsity_k_var.get() not in self.sparsity_k_map:
                     errors.append("Sparsity K must be one of the supported percentages.")

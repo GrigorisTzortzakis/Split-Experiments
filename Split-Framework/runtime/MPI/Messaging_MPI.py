@@ -715,6 +715,7 @@ class MessageManager(Observer):
                 return None
             codec_bits = quantization_bits if bits_override is None else int(bits_override)
             codec_granularity = _granularity_for_kind(kind)
+            reduction_storage_bits = 32
             # Keep imports local so MPI can still run if compression module is absent.
             from compression.quantization.arithmetic_conversion import (
                 IntCodec,
@@ -739,25 +740,25 @@ class MessageManager(Observer):
             if kind in ("random_projection", "autoencoder"):
                 return RandomProjectionCodec(
                     reduction_ratio=_normalize_dimensionality_ratio(dimensionality_reduction_ratio, 0.25),
-                    storage_bits=max(8, codec_bits),
+                    storage_bits=reduction_storage_bits,
                 )
             if kind in ("low_rank_pca", "low_rank_projection", "pca_projection", "pca", "low_rank"):
                 return LowRankPCAProjectionCodec(
                     reduction_ratio=_normalize_dimensionality_ratio(dimensionality_reduction_ratio, 0.25),
-                    storage_bits=max(8, codec_bits),
+                    storage_bits=reduction_storage_bits,
                 )
             if kind in ("top_k", "topk", "top_k_sparsity"):
-                return TopKSparsityCodec(k_percent=_normalize_sparsity_percent(sparsity_k, 1), storage_bits=max(8, codec_bits))
+                return TopKSparsityCodec(k_percent=_normalize_sparsity_percent(sparsity_k, 1), storage_bits=reduction_storage_bits)
             if kind in ("random_top_k", "random_topk", "random_top_k_sparsity"):
                 return RandomTopKSparsityCodec(
                     k_percent=_normalize_sparsity_percent(sparsity_k, 5),
-                    storage_bits=max(8, codec_bits),
+                    storage_bits=reduction_storage_bits,
                 )
             if kind in ("paper_top_k", "paper_topk", "paper_top_k_sparsity"):
                 return PaperTopKSparsityCodec(
                     k_percent=_normalize_sparsity_percent(sparsity_k, 5),
                     alpha=_get_float_arg(self.args, "paper_top_k_alpha", 0.1),
-                    storage_bits=max(8, codec_bits),
+                    storage_bits=reduction_storage_bits,
                 )
             if kind in ("split_fc", "splitfc"):
                 split_fc_ratio = _get_float_arg(self.args, "split_fc_reduction_ratio", None)
