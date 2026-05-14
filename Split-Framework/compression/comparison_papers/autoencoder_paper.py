@@ -1,3 +1,5 @@
+"""Improving the Communication and Computation Efficiency of Split Learning for IoT Applications."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass

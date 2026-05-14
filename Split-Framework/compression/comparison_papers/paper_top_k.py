@@ -1,3 +1,5 @@
+"""Reducing Communication for Split Learning by Randomized Top-k Sparsification."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field

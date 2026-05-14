@@ -1,3 +1,5 @@
+"""Communication-Efficient Split Learning via Adaptive Feature-Wise Compression."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
