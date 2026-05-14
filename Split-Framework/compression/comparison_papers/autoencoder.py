@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, Iterable, Optional, Sequence, Tuple
+from typing import Dict, Optional, Sequence, Tuple
 
 import torch
 from torch import nn
@@ -168,6 +168,10 @@ def broadcast_client_weights(client_models: Sequence[nn.Module], shared_state: O
     return state
 
 
+def synchronize_clients(client_models: Sequence[nn.Module]) -> Dict[str, torch.Tensor]:
+    return broadcast_client_weights(client_models)
+
+
 class PaperAutoencoderSplitLearning:
     def __init__(
         self,
@@ -183,6 +187,7 @@ class PaperAutoencoderSplitLearning:
         freeze_autoencoder_during_training: bool = True,
         client_optimizer: Optional[Optimizer] = None,
         server_optimizer: Optional[Optimizer] = None,
+        autoencoder_optimizer: Optional[Optimizer] = None,
     ) -> None:
         self.client = client if client is not None else PaperAutoencoderClient()
         self.encoder = encoder if encoder is not None else PaperAutoencoderEncoder()
@@ -195,9 +200,20 @@ class PaperAutoencoderSplitLearning:
         if self.freeze_autoencoder_during_training:
             freeze_module(self.encoder)
             freeze_module(self.decoder)
-        self.client_optimizer = client_optimizer if client_optimizer is not None else SGD(self.client.parameters(), lr=self.learning_rate, momentum=self.momentum)
-        self.server_optimizer = server_optimizer if server_optimizer is not None else SGD(self.server.parameters(), lr=self.learning_rate, momentum=self.momentum)
+        self.client_optimizer = client_optimizer if client_optimizer is not None else SGD(
+            self.client.parameters(), lr=self.learning_rate, momentum=self.momentum
+        )
+        self.server_optimizer = server_optimizer if server_optimizer is not None else SGD(
+            self.server.parameters(), lr=self.learning_rate, momentum=self.momentum
+        )
+
+        ae_params = list(self.encoder.parameters()) + list(self.decoder.parameters())
+        self.autoencoder_optimizer = autoencoder_optimizer if autoencoder_optimizer is not None else SGD(
+            ae_params, lr=self.learning_rate, momentum=self.momentum
+        )
+
         self.loss_fn = nn.NLLLoss()
+        self.reconstruction_loss_fn = nn.MSELoss()
 
     @classmethod
     def paper_configuration(
@@ -207,13 +223,14 @@ class PaperAutoencoderSplitLearning:
         num_classes: int = PAPER_NUM_CLASSES,
         learning_rate: float = PAPER_LEARNING_RATE,
         momentum: float = PAPER_MOMENTUM,
+        autoencoder_is_pretrained: bool = False,
     ) -> "PaperAutoencoderSplitLearning":
         return cls(
             num_classes=num_classes,
             gradient_threshold=gradient_threshold,
             learning_rate=learning_rate,
             momentum=momentum,
-            freeze_autoencoder_during_training=True,
+            freeze_autoencoder_during_training=autoencoder_is_pretrained,
         )
 
     def autoencoder_forward(self, activation: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -225,15 +242,79 @@ class PaperAutoencoderSplitLearning:
         _, reconstructed = self.autoencoder_forward(activation)
         return torch.mean((activation - reconstructed) ** 2)
 
+    def train_autoencoder_step(self, x: torch.Tensor) -> float:
+        self.client.eval()
+        self.encoder.train()
+        self.decoder.train()
+
+        for parameter in self.encoder.parameters():
+            parameter.requires_grad_(True)
+        for parameter in self.decoder.parameters():
+            parameter.requires_grad_(True)
+
+        self.autoencoder_optimizer.zero_grad(set_to_none=True)
+
+        with torch.no_grad():
+            split_activation = self.client(x)
+
+        latent = self.encoder(split_activation)
+        reconstructed = self.decoder(latent)
+
+        reconstruction_loss = self.reconstruction_loss_fn(reconstructed, split_activation)
+        reconstruction_loss.backward()
+        self.autoencoder_optimizer.step()
+
+        return float(reconstruction_loss.item())
+
+    def freeze_autoencoder(self) -> None:
+        freeze_module(self.encoder)
+        freeze_module(self.decoder)
+        self.freeze_autoencoder_during_training = True
+
+    def load_autoencoder_weights(self, encoder_state: Dict[str, torch.Tensor], decoder_state: Dict[str, torch.Tensor]) -> None:
+        self.encoder.load_state_dict(encoder_state, strict=True)
+        self.decoder.load_state_dict(decoder_state, strict=True)
+        self.freeze_autoencoder()
+
+    def should_freeze_autoencoder(self, reconstruction_loss: float, threshold: float) -> bool:
+        return float(reconstruction_loss) <= float(threshold)
+
     def should_send_gradient(self, loss_value: float) -> bool:
         return float(loss_value) > self.gradient_threshold
 
+    def warmup_step(self, x: torch.Tensor, y: torch.Tensor) -> Tuple[float, PaperAutoencoderStepResult]:
+        if self.freeze_autoencoder_during_training:
+            raise RuntimeError(
+                "warmup_step() is for the AE-training phase. "
+                "Do not call it after freeze_autoencoder() or load_autoencoder_weights()."
+            )
+
+        ae_loss = self.train_autoencoder_step(x)
+
+        self.freeze_autoencoder_during_training = True
+        result = self.training_step(x, y)
+        self.freeze_autoencoder_during_training = False
+
+        self.encoder.train()
+        self.decoder.train()
+        for parameter in self.encoder.parameters():
+            parameter.requires_grad_(True)
+        for parameter in self.decoder.parameters():
+            parameter.requires_grad_(True)
+
+        return ae_loss, result
+
     def training_step(self, x: torch.Tensor, y: torch.Tensor) -> PaperAutoencoderStepResult:
+        if not self.freeze_autoencoder_during_training:
+            raise RuntimeError(
+                "training_step() expects a trained/frozen autoencoder. "
+                "Call train_autoencoder_step(...) during warmup, then freeze_autoencoder()."
+            )
+
         self.client.train()
         self.server.train()
-        if self.freeze_autoencoder_during_training:
-            self.encoder.eval()
-            self.decoder.eval()
+        self.encoder.eval()
+        self.decoder.eval()
 
         self.client_optimizer.zero_grad(set_to_none=True)
         self.server_optimizer.zero_grad(set_to_none=True)
@@ -241,7 +322,7 @@ class PaperAutoencoderSplitLearning:
         split_activation = self.client(x)
         with torch.no_grad():
             latent = self.encoder(split_activation)
-            reconstructed = self.decoder(latent.detach())
+            reconstructed = self.decoder(latent)
 
         split_proxy = reconstructed.detach().requires_grad_(True)
         log_probs = self.server(split_proxy)
@@ -298,6 +379,7 @@ __all__ = [
     "freeze_module",
     "average_client_weights",
     "broadcast_client_weights",
+    "synchronize_clients",
     "paper_epoch_traffic_bytes",
     "paper_client_total_flops",
 ]
