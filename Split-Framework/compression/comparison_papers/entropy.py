@@ -4,22 +4,12 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from typing import Callable, Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Tuple
 
 import torch
 from torch import Tensor, nn
 from torch.nn import functional as F
 from torch.optim import Adam, Optimizer
-
-try:
-    from compressai.entropy_models import EntropyBottleneck as _CompressAIEntropyBottleneck
-    from compressai.layers import GDN as _CompressAIGDN
-
-except ImportError as exc:
-    raise ImportError(
-        "Paper-faithful SplitFedZip requires CompressAI. "
-        "Install compressai instead of using the fallback entropy model."
-    ) from exc
 
 
 PAPER_CODEC_CHANNELS = 64
@@ -30,12 +20,26 @@ PAPER_SCHEMES = ("F", "FG")
 PAPER_GRADIENT_STRATEGIES = ("paper",)
 
 
+def _import_compressai_symbols():
+    try:
+        from compressai.entropy_models import EntropyBottleneck
+        from compressai.layers import GDN
+    except ImportError as exc:
+        raise ImportError(
+            "Paper-faithful SplitFedZip requires CompressAI. "
+            "Install compressai instead of using the fallback entropy model."
+        ) from exc
+    return EntropyBottleneck, GDN
+
+
 def _make_gdn(channels: int, *, inverse: bool = False) -> nn.Module:
-    return _CompressAIGDN(channels, inverse=inverse)
+    _EntropyBottleneck, GDN = _import_compressai_symbols()
+    return GDN(channels, inverse=inverse)
 
 
 def _make_entropy_bottleneck(channels: int) -> nn.Module:
-    return _CompressAIEntropyBottleneck(channels)
+    EntropyBottleneck, _GDN = _import_compressai_symbols()
+    return EntropyBottleneck(channels)
 
 
 def _reference_nhw(reference_input: Tensor) -> float:
@@ -109,24 +113,28 @@ class PaperEntropyStepResult:
 
 
 class PaperEntropyCodec(nn.Module):
-    def __init__(self, channels: int = PAPER_CODEC_CHANNELS) -> None:
+    def __init__(self, channels: int = PAPER_CODEC_CHANNELS, seed: Optional[int] = None) -> None:
         super().__init__()
         self.channels = int(channels)
-        self.encoder = nn.Sequential(
-            nn.Conv2d(self.channels, self.channels, kernel_size=5, stride=2, padding=2),
-            _make_gdn(self.channels),
-            nn.Conv2d(self.channels, self.channels, kernel_size=5, stride=2, padding=2),
-            _make_gdn(self.channels),
-            nn.Conv2d(self.channels, self.channels, kernel_size=5, stride=2, padding=2),
-        )
-        self.entropy_bottleneck = _make_entropy_bottleneck(self.channels)
-        self.decoder = nn.Sequential(
-            nn.ConvTranspose2d(self.channels, self.channels, kernel_size=5, stride=2, padding=2, output_padding=1),
-            _make_gdn(self.channels, inverse=True),
-            nn.ConvTranspose2d(self.channels, self.channels, kernel_size=5, stride=2, padding=2, output_padding=1),
-            _make_gdn(self.channels, inverse=True),
-            nn.ConvTranspose2d(self.channels, self.channels, kernel_size=5, stride=2, padding=2, output_padding=1),
-        )
+        self.seed = None if seed is None else int(seed)
+        with torch.random.fork_rng(devices=[]):
+            if self.seed is not None:
+                torch.manual_seed(self.seed)
+            self.encoder = nn.Sequential(
+                nn.Conv2d(self.channels, self.channels, kernel_size=5, stride=2, padding=2),
+                _make_gdn(self.channels),
+                nn.Conv2d(self.channels, self.channels, kernel_size=5, stride=2, padding=2),
+                _make_gdn(self.channels),
+                nn.Conv2d(self.channels, self.channels, kernel_size=5, stride=2, padding=2),
+            )
+            self.entropy_bottleneck = _make_entropy_bottleneck(self.channels)
+            self.decoder = nn.Sequential(
+                nn.ConvTranspose2d(self.channels, self.channels, kernel_size=5, stride=2, padding=2, output_padding=1),
+                _make_gdn(self.channels, inverse=True),
+                nn.ConvTranspose2d(self.channels, self.channels, kernel_size=5, stride=2, padding=2, output_padding=1),
+                _make_gdn(self.channels, inverse=True),
+                nn.ConvTranspose2d(self.channels, self.channels, kernel_size=5, stride=2, padding=2, output_padding=1),
+            )
 
     def forward(self, x: Tensor) -> Tuple[Tensor, Tensor]:
         y = self.encoder(x)
@@ -158,6 +166,81 @@ class PaperEntropyCodec(nn.Module):
         if hasattr(self.entropy_bottleneck, "aux_parameters"):
             return self.entropy_bottleneck.aux_parameters()
         return ()
+
+
+class PaperEntropyTransportCodec:
+    def __init__(self, channels: Optional[int] = None, seed: Optional[int] = None) -> None:
+        self.channels = None if channels is None else int(channels)
+        self.seed = None if seed is None else int(seed)
+        self._codec: Optional[PaperEntropyCodec] = None
+
+    def _ensure_codec(self, channels: int) -> PaperEntropyCodec:
+        normalized_channels = int(channels)
+        if normalized_channels <= 0:
+            raise ValueError("Paper entropy codec requires a positive channel count")
+        if self._codec is not None and int(self._codec.channels) == normalized_channels:
+            return self._codec
+        self.channels = normalized_channels
+        self._codec = PaperEntropyCodec(channels=normalized_channels, seed=self.seed)
+        self._codec.eval()
+        self._codec.entropy_bottleneck.update(force=True)
+        return self._codec
+
+    def _validate_tensor(self, x: Tensor) -> Tensor:
+        if not isinstance(x, torch.Tensor):
+            raise TypeError(f"encode expects a torch.Tensor, got {type(x)!r}")
+        if x.ndim != 4:
+            raise ValueError("Paper entropy transport codec currently requires 4D tensors shaped [N, C, H, W]")
+        return x.detach().to(device="cpu", dtype=torch.float32)
+
+    def encode(self, x: Tensor) -> Dict[str, Any]:
+        x_cpu = self._validate_tensor(x)
+        codec = self._ensure_codec(int(x_cpu.shape[1]))
+        with torch.no_grad():
+            codec.entropy_bottleneck.update(force=True)
+            latent = codec.encoder(x_cpu)
+            strings = codec.entropy_bottleneck.compress(latent)
+        return {
+            "codec": "paper_entropy",
+            "direction": "transport",
+            "shape": tuple(int(dim) for dim in x_cpu.shape),
+            "latent_shape": tuple(int(dim) for dim in latent.shape[-2:]),
+            "channels": int(codec.channels),
+            "strings": [bytes(chunk) for chunk in strings],
+        }
+
+    def decode(
+        self,
+        payload: Dict[str, Any],
+        *,
+        device: Optional[torch.device | str] = None,
+        dtype: torch.dtype = torch.float32,
+    ) -> Tensor:
+        if not isinstance(payload, dict):
+            raise TypeError(f"decode expects a dict payload, got {type(payload)!r}")
+        if payload.get("codec") != "paper_entropy":
+            raise ValueError("Invalid payload codec for PaperEntropyTransportCodec")
+
+        shape = tuple(int(dim) for dim in payload.get("shape") or ())
+        latent_shape = tuple(int(dim) for dim in payload.get("latent_shape") or ())
+        strings = payload.get("strings")
+        channels = int(payload.get("channels") or (shape[1] if len(shape) >= 2 else 0))
+        if len(shape) != 4:
+            raise ValueError("Paper entropy payload must include a 4D original tensor shape")
+        if len(latent_shape) != 2:
+            raise ValueError("Paper entropy payload must include latent spatial shape")
+        if not isinstance(strings, list) or not all(isinstance(chunk, (bytes, bytearray)) for chunk in strings):
+            raise TypeError("Paper entropy payload must include a list of byte strings")
+
+        codec = self._ensure_codec(channels)
+        with torch.no_grad():
+            codec.entropy_bottleneck.update(force=True)
+            latent = codec.entropy_bottleneck.decompress([bytes(chunk) for chunk in strings], latent_shape)
+            reconstructed = codec.decoder(latent)
+            if reconstructed.shape[-2:] != shape[-2:]:
+                reconstructed = F.interpolate(reconstructed, size=shape[-2:], mode="bilinear", align_corners=False)
+        target_device = device if device is not None else "cpu"
+        return reconstructed.to(device=target_device, dtype=dtype)
 
 
 class PaperEntropyFrontEnd(nn.Module):
@@ -515,6 +598,7 @@ __all__ = [
     "EntropyCompressionResult",
     "PaperEntropyStepResult",
     "PaperEntropyCodec",
+    "PaperEntropyTransportCodec",
     "PaperEntropyFrontEnd",
     "PaperEntropyServerModel",
     "PaperEntropyBackEnd",

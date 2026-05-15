@@ -1743,6 +1743,8 @@ def _basic_label_from_path(log_path: Path) -> str:
     match = re.search(r"/comparison_papers/split_fc/(\d+)pct/", rel)
     if match:
         return f"split fc {match.group(1)}%"
+    if "/comparison_papers/entropy/" in rel:
+        return "entropy"
     if "/comparison_papers/autoencoder_paper/" in rel:
         return "autoencoder paper"
     if "/arithmetic_conversion/int/" in rel or "/arithmetic_conversion/int8/" in rel:

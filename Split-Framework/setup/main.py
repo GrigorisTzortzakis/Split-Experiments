@@ -466,6 +466,8 @@ def main():
                 return ("dimensionality_reduction", ("autoencoder", f"{dimensionality_ratio_pct}pct"))
             if kind in ("autoencoder_paper", "autoencoder-paper"):
                 return ("comparison_papers", ("autoencoder_paper",))
+            if kind in ("entropy",):
+                return ("comparison_papers", ("entropy",))
             if kind in ("low_rank_pca", "low_rank_projection", "pca_projection", "pca", "low_rank"):
                 return ("dimensionality_reduction", ("low_rank_pca", f"{dimensionality_ratio_pct}pct"))
             if kind in ("fp8_e4m3", "float8_e4m3", "e4m3", "float8", "float"):

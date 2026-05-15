@@ -193,7 +193,7 @@ def _args_quantization_tags(args) -> Dict[str, str]:
     backward_parts = [part.strip() for part in backward_method.split("+") if part.strip()]
     has_combined = len(forward_parts) > 1 or len(backward_parts) > 1
     sparse_methods = {"top_k", "topk", "top_k_sparsity", "random_top_k", "random_topk", "random_top_k_sparsity"}
-    comparison_paper_methods = {"paper_top_k", "paper_topk", "paper_top_k_sparsity", "split_fc", "splitfc"}
+    comparison_paper_methods = {"paper_top_k", "paper_topk", "paper_top_k_sparsity", "split_fc", "splitfc", "entropy", "paper_entropy"}
     dimensionality_methods = {"random_projection", "autoencoder", "low_rank_pca", "low_rank_projection", "pca_projection", "pca", "low_rank"}
     all_methods = set(forward_parts + backward_parts)
     if has_combined:
@@ -221,11 +221,14 @@ def _args_quantization_tags(args) -> Dict[str, str]:
             profile = "chunk4_codebook64"
         family = "dimensionality_reduction"
     elif forward_method in comparison_paper_methods or backward_method in comparison_paper_methods:
-        try:
-            ratio = float(args.get("split_fc_reduction_ratio") or 16.0)
-            profile = f"{int(round(100.0 / max(ratio, 1.0)))}pct"
-        except Exception:
-            profile = "6pct"
+        if forward_method in {"entropy", "paper_entropy"} or backward_method in {"entropy", "paper_entropy"}:
+            profile = "entropy"
+        else:
+            try:
+                ratio = float(args.get("split_fc_reduction_ratio") or 16.0)
+                profile = f"{int(round(100.0 / max(ratio, 1.0)))}pct"
+            except Exception:
+                profile = "6pct"
         family = "comparison_papers"
     else:
         profile = f"{int(args.get('quantization_bits') or 8)}bit"

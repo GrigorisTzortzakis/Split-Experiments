@@ -1,0 +1,23 @@
+2026-05-15 12:21:51,759 - datasetFactory - INFO - 16136 - resource_usage phase=startup seq=0 rank=0 variants=SplitFed pid=16136 ppid=23080 process_cpu_pct=0.0 process_rss_mb=586.74 process_vms_mb=1693.34 process_threads=31 system_cpu_pct=0.0 system_ram_pct=73.1 system_ram_used_mb=11343.95 system_ram_available_mb=4175.74 process_uss_mb=435.18 process_handles=448 gpu_state=unavailable
+2026-05-15 12:21:51,759 - datasetFactory - INFO - 16136 - cifar10
+2026-05-15 12:21:51,823 - datasetFactory - INFO - 21956 - resource_usage phase=startup seq=0 rank=2 variants=SplitFed pid=21956 ppid=18448 process_cpu_pct=0.0 process_rss_mb=586.3 process_vms_mb=1693.05 process_threads=31 system_cpu_pct=0.0 system_ram_pct=73.5 system_ram_used_mb=11410.78 system_ram_available_mb=4108.91 process_uss_mb=434.73 process_handles=447 gpu_state=unavailable
+2026-05-15 12:21:51,825 - datasetFactory - INFO - 21956 - cifar10
+2026-05-15 12:21:51,896 - main - INFO - 21956 - Process 2 initialized with device: cpu
+2026-05-15 12:21:51,896 - SplitNN_distributed - INFO - 21956 - process_id == fed_server_rank : 2
+2026-05-15 12:21:51,896 - TorchvisionDatasetController - INFO - 23184 - <bound method DataPartitioner.homo of <datasets.Partition_Data.DataPartitioner object at 0x000002064EFA09E0>>
+2026-05-15 12:21:51,896 - DataPartitioner - INFO - 23184 - homo
+2026-05-15 12:21:51,896 - TorchvisionDatasetController - INFO - 23184 - F:\phd\Split-Experiments\Split-Framework\datasets\downloads
+2026-05-15 12:21:51,900 - TorchvisionDatasetController - INFO - 16136 - <bound method DataPartitioner.homo of <datasets.Partition_Data.DataPartitioner object at 0x0000019BD3024D70>>
+2026-05-15 12:21:51,901 - DataPartitioner - INFO - 16136 - homo
+2026-05-15 12:21:51,901 - TorchvisionDatasetController - INFO - 16136 - F:\phd\Split-Experiments\Split-Framework\datasets\downloads
+2026-05-15 12:21:51,919 - init_fed_server - INFO - 21956 - FedServer run begin SplitFed
+2026-05-15 12:21:52,909 - TorchvisionDatasetController - INFO - 23184 - rank = 1, local_sample_number = 50000
+2026-05-15 12:21:53,867 - TorchvisionDatasetController - INFO - 16136 - train_dl_global number = 390
+2026-05-15 12:21:53,867 - TorchvisionDatasetController - INFO - 16136 - test_dl_global number = 79
+2026-05-15 12:21:53,873 - main - INFO - 16136 - Process 0 initialized with device: cuda:0
+2026-05-15 12:21:53,873 - SplitNN_distributed - INFO - 16136 - process_id == server_rank : 0
+2026-05-15 12:21:53,884 - init_server - INFO - 16136 - Server run begin SplitFed
+2026-05-15 12:21:53,902 - TorchvisionDatasetController - INFO - 23184 - process_id = 1, batch_num_train_local = 390, batch_num_test_local = 79
+2026-05-15 12:21:53,908 - main - INFO - 23184 - Process 1 initialized with device: cpu
+2026-05-15 12:21:53,908 - SplitNN_distributed - INFO - 23184 - process_id == client_rank : 1
+2026-05-15 12:21:54,161 - init_client - INFO - 23184 - Client 1 run begin

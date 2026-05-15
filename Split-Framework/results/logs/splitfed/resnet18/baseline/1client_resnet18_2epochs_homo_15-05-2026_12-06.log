@@ -1,0 +1,24 @@
+2026-05-15 12:06:46,093 - datasetFactory - INFO - 16796 - resource_usage phase=startup seq=0 rank=1 variants=SplitFed pid=16796 ppid=3708 process_cpu_pct=0.0 process_rss_mb=586.41 process_vms_mb=1692.59 process_threads=31 system_cpu_pct=15.0 system_ram_pct=70.3 system_ram_used_mb=10912.86 system_ram_available_mb=4606.82 process_uss_mb=434.84 process_handles=443 gpu_state=unavailable
+2026-05-15 12:06:46,094 - datasetFactory - INFO - 16796 - cifar10
+2026-05-15 12:06:46,097 - datasetFactory - INFO - 20092 - resource_usage phase=startup seq=0 rank=2 variants=SplitFed pid=20092 ppid=21300 process_cpu_pct=0.0 process_rss_mb=587.01 process_vms_mb=1693.48 process_threads=31 system_cpu_pct=15.0 system_ram_pct=70.3 system_ram_used_mb=10912.86 system_ram_available_mb=4606.82 process_uss_mb=435.45 process_handles=443 gpu_state=unavailable
+2026-05-15 12:06:46,098 - datasetFactory - INFO - 11988 - cifar10
+2026-05-15 12:06:46,098 - datasetFactory - INFO - 20092 - cifar10
+2026-05-15 12:06:46,165 - TorchvisionDatasetController - INFO - 16796 - <bound method DataPartitioner.homo of <datasets.Partition_Data.DataPartitioner object at 0x000001DE513DA540>>
+2026-05-15 12:06:46,165 - DataPartitioner - INFO - 16796 - homo
+2026-05-15 12:06:46,165 - TorchvisionDatasetController - INFO - 16796 - F:\phd\Split-Experiments\Split-Framework\datasets\downloads
+2026-05-15 12:06:46,228 - main - INFO - 20092 - Process 2 initialized with device: cpu
+2026-05-15 12:06:46,228 - SplitNN_distributed - INFO - 20092 - process_id == fed_server_rank : 2
+2026-05-15 12:06:46,317 - TorchvisionDatasetController - INFO - 11988 - <bound method DataPartitioner.homo of <datasets.Partition_Data.DataPartitioner object at 0x000001A7CCE21430>>
+2026-05-15 12:06:46,317 - DataPartitioner - INFO - 11988 - homo
+2026-05-15 12:06:46,317 - TorchvisionDatasetController - INFO - 11988 - F:\phd\Split-Experiments\Split-Framework\datasets\downloads
+2026-05-15 12:06:47,169 - TorchvisionDatasetController - INFO - 16796 - rank = 1, local_sample_number = 50000
+2026-05-15 12:06:48,200 - TorchvisionDatasetController - INFO - 16796 - process_id = 1, batch_num_train_local = 390, batch_num_test_local = 79
+2026-05-15 12:06:48,206 - main - INFO - 16796 - Process 1 initialized with device: cpu
+2026-05-15 12:06:48,206 - SplitNN_distributed - INFO - 16796 - process_id == client_rank : 1
+2026-05-15 12:06:48,305 - TorchvisionDatasetController - INFO - 11988 - train_dl_global number = 390
+2026-05-15 12:06:48,305 - TorchvisionDatasetController - INFO - 11988 - test_dl_global number = 79
+2026-05-15 12:06:48,311 - main - INFO - 11988 - Process 0 initialized with device: cuda:0
+2026-05-15 12:06:48,311 - SplitNN_distributed - INFO - 11988 - process_id == server_rank : 0
+2026-05-15 12:06:48,337 - datasetFactory - INFO - 20092 - resource_usage phase=shutdown seq=1 rank=2 variants=SplitFed pid=20092 ppid=21300 process_cpu_pct=0.0 process_rss_mb=632.11 process_vms_mb=1758.64 process_threads=32 system_cpu_pct=10.3 system_ram_pct=74.1 system_ram_used_mb=11499.01 system_ram_available_mb=4020.67 process_uss_mb=479.48 process_handles=463 gpu_state=unavailable
+2026-05-15 12:06:48,338 - datasetFactory - INFO - 16796 - resource_usage phase=shutdown seq=1 rank=1 variants=SplitFed pid=16796 ppid=3708 process_cpu_pct=0.0 process_rss_mb=811.89 process_vms_mb=1937.9 process_threads=32 system_cpu_pct=10.3 system_ram_pct=74.1 system_ram_used_mb=11499.01 system_ram_available_mb=4020.67 process_uss_mb=658.84 process_handles=469 gpu_state=unavailable
+2026-05-15 12:06:48,378 - datasetFactory - INFO - 11988 - resource_usage phase=shutdown seq=1 rank=0 variants=SplitFed pid=11988 ppid=19744 process_cpu_pct=0.0 process_rss_mb=909.55 process_vms_mb=2245.02 process_threads=33 system_cpu_pct=10.3 system_ram_pct=74.1 system_ram_used_mb=11499.01 system_ram_available_mb=4020.67 process_uss_mb=754.32 process_handles=480 gpu_free_mb=10971.0 gpu_total_mb=12226.56 gpu_allocated_mb=42.1 gpu_reserved_mb=64.0 gpu_max_allocated_mb=42.1 gpu_max_reserved_mb=64.0 gpu_index=0 gpu_name=NVIDIA GeForce RTX 5070 gpu_util_pct=1 gpu_mem_util_pct=1 gpu_mem_used_mb=1283 gpu_mem_total_mb=12227 gpu_temp_c=54 gpu_power_w=37.35

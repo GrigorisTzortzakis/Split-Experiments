@@ -725,7 +725,7 @@ class MessageManager(Observer):
                 LowRankPCAProjectionCodec,
                 RandomProjectionCodec,
             )
-            from compression.comparison_papers import PaperTopKSparsityCodec, SplitFCCodec
+            from compression.comparison_papers import PaperEntropyTransportCodec, PaperTopKSparsityCodec, SplitFCCodec
             from compression.sparsity import RandomTopKSparsityCodec, TopKSparsityCodec
             from compression.quantization.codeword import (
                 LloydMaxCodebookUInt8Codec,
@@ -759,6 +759,10 @@ class MessageManager(Observer):
                     k_percent=_normalize_sparsity_percent(sparsity_k, 5),
                     alpha=_get_float_arg(self.args, "paper_top_k_alpha", 0.1),
                     storage_bits=reduction_storage_bits,
+                )
+            if kind in ("entropy", "paper_entropy"):
+                return PaperEntropyTransportCodec(
+                    seed=_get_float_arg(self.args, "seed", None),
                 )
             if kind in ("split_fc", "splitfc"):
                 split_fc_ratio = _get_float_arg(self.args, "split_fc_reduction_ratio", None)
@@ -821,7 +825,7 @@ class MessageManager(Observer):
                 if self._fwd_codec is None:
                     raise ValueError("Forward quantization was requested but no forward codec was created.")
             if self._quantize_backward:
-                shared_sparse_kind = str(self._forward_quantization or "").strip().lower() in {"paper_top_k", "paper_topk", "paper_top_k_sparsity", "split_fc", "splitfc"}
+                shared_sparse_kind = str(self._forward_quantization or "").strip().lower() in {"paper_top_k", "paper_topk", "paper_top_k_sparsity", "split_fc", "splitfc", "entropy", "paper_entropy"}
                 if self._quantize_forward and shared_sparse_kind and str(self._backward_quantization or "").strip().lower() == str(self._forward_quantization or "").strip().lower():
                     self._bwd_codec = self._fwd_codec
                 else:
