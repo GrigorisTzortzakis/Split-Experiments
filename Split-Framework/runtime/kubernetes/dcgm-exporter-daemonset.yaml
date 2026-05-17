@@ -11,7 +11,6 @@ spec:
       labels:
         app: dcgm-exporter
     spec:
-      runtimeClassName: nvidia
       containers:
         - name: dcgm-exporter
           image: nvcr.io/nvidia/k8s/dcgm-exporter:3.3.9-3.6.1-ubuntu22.04
