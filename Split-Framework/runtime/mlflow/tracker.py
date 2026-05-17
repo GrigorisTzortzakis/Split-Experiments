@@ -744,6 +744,9 @@ def export_run_to_mlflow(*, args, project_root: Path, success: bool, error_messa
         else:
             experiment_name = _args_experiment_name(args, is_quantized=is_quantized)
 
+    grafana_dashboard_url = "http://127.0.0.1:4000/d/split-framework-live/split-framework-live-containers"
+    mlflow_ui_url = "http://127.0.0.1:5000"
+
     mlflow.set_tracking_uri(tracking_uri)
     mlflow.set_experiment(experiment_name)
 
@@ -763,6 +766,8 @@ def export_run_to_mlflow(*, args, project_root: Path, success: bool, error_messa
                 "model": str(args["model"] or ""),
                 "dataset": str(args["dataset"] or ""),
                 "run_log": rel_log,
+                "observability_grafana_url": grafana_dashboard_url,
+                "observability_mlflow_ui": mlflow_ui_url,
                 **summary_tags,
             }
         )

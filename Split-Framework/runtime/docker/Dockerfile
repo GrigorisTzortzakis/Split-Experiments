@@ -10,10 +10,17 @@ ENV DEBIAN_FRONTEND=noninteractive \
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         build-essential \
+        docker-cli \
+        docker.io \
         git \
         libopenmpi-dev \
         openmpi-bin \
     && rm -rf /var/lib/apt/lists/*
+
+RUN docker_bin="/usr/bin/docker" \
+    && printf '#!/bin/sh\ncontainer="$1"\nshift\nexec %s exec -i "$container" /bin/sh -lc "$*"\n' "$docker_bin" > /usr/local/bin/docker-exec \
+    && ln -sf "$docker_bin" /usr/local/bin/docker \
+    && chmod +x /usr/local/bin/docker-exec
 
 RUN python -m pip install --upgrade pip \
     && python -m pip install \

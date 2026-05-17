@@ -18,7 +18,6 @@ import ast
 import importlib.util
 import json
 import math
-import re
 import webbrowser
 from dataclasses import dataclass
 from pathlib import Path
@@ -32,7 +31,23 @@ from tkinter import ttk
 SETUP_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = SETUP_DIR.parent
 DOCKER_DIR = PROJECT_ROOT / "runtime" / "docker"
+KUBERNETES_DIR = PROJECT_ROOT / "runtime" / "kubernetes"
 DOCKER_IMAGE = "split-framework-runner:latest"
+DOCKER_MULTI_CONTAINER_LAUNCHER = DOCKER_DIR / "launch_multi_container.py"
+KUBERNETES_START_SCRIPT = KUBERNETES_DIR / "start_observability.ps1"
+OBSERVABILITY_UI_PORT = 4000
+MLFLOW_UI_PORT = 5000
+OBSERVABILITY_DASHBOARD_URL = f"http://127.0.0.1:{OBSERVABILITY_UI_PORT}/d/split-framework-live/split-framework-live-containers"
+DOCKER_SERVER_CPUS = 5.0
+DOCKER_SERVER_MEMORY = 3.0 * 1024 ** 3
+DOCKER_SERVER_SWAP = 3500 * 1024 ** 2
+DOCKER_CLIENT_CPUS = 1.75
+DOCKER_CLIENT_MEMORY = 1200 * 1024 ** 2
+DOCKER_CLIENT_SWAP = 1500 * 1024 ** 2
+DOCKER_FED_SERVER_CPUS = 2.0
+DOCKER_FED_SERVER_MEMORY = 1500 * 1024 ** 2
+DOCKER_FED_SERVER_SWAP = 2 * 1024 ** 3
+DOCKER_SHM_SIZE = "2g"
 
 
 def _find_python_executable() -> str:
@@ -216,7 +231,7 @@ def _load_defaults(path: Path) -> Dict[str, object]:
 
 
 def _find_mpiexec() -> str:
-    candidates = ["mpiexec", "mpiexec.exe", "mpirun", "mpirun.exe"]
+    candidates = ["mpiexec.exe", "mpiexec", "mpirun.exe", "mpirun"]
     for candidate in candidates:
         resolved = shutil_which(candidate)
         if resolved:
@@ -225,22 +240,44 @@ def _find_mpiexec() -> str:
 
 
 def _find_docker() -> str:
-    candidates = ["docker", "docker.exe"]
+    candidates = ["docker.exe", "docker"]
     for candidate in candidates:
         resolved = shutil_which(candidate)
         if resolved:
             return resolved
+    windows_candidates = [
+        Path("C:/Program Files/Docker/Docker/resources/bin/docker.exe"),
+        Path("C:/Program Files/Docker/Docker/resources/docker.exe"),
+        Path.home() / "AppData" / "Local" / "Programs" / "Docker" / "Docker" / "resources" / "bin" / "docker.exe",
+    ]
+    for candidate in windows_candidates:
+        if candidate.exists():
+            return str(candidate)
     return "docker"
 
 
+def _tool_exists(command: str) -> bool:
+    candidate = Path(command)
+    if candidate.is_absolute():
+        return candidate.exists()
+    return shutil_which(command) is not None
+
+
 def shutil_which(name: str) -> Optional[str]:
+    if os.name == "nt" and not Path(name).suffix:
+        pathext = [ext for ext in os.environ.get("PATHEXT", ".COM;.EXE;.BAT;.CMD").split(";") if ext]
+        candidate_names = [f"{name}{ext}" for ext in pathext] + [name]
+    else:
+        candidate_names = [name]
+
     path_env = os.environ.get("PATH", "")
     for directory in path_env.split(os.pathsep):
         if not directory:
             continue
-        candidate = Path(directory) / name
-        if candidate.exists():
-            return str(candidate)
+        for candidate_name in candidate_names:
+            candidate = Path(directory) / candidate_name
+            if candidate.exists():
+                return str(candidate)
     return None
 
 
@@ -290,6 +327,7 @@ class ExperimentMenu:
         self.jobs_lock = threading.Lock()
         self.process: Optional[subprocess.Popen[str]] = None
         self.mlflow_process: Optional[subprocess.Popen[str]] = None
+        self.observability_process: Optional[subprocess.Popen[str]] = None
         self.runner_thread: Optional[threading.Thread] = None
         self.stop_requested = False
         self.running = False
@@ -316,16 +354,6 @@ class ExperimentMenu:
         self.dataset_var = tk.StringVar(value=str(self.defaults.get("dataset") or DATASET_OPTIONS[0]))
         self.device_var = tk.StringVar(value=self._default_device_label())
         self.launch_backend_var = tk.StringVar(value=self._default_launch_backend_label())
-        self.docker_server_cpus_var = tk.StringVar(value=self._default_saved_text("docker_server_cpus", "5"))
-        self.docker_server_memory_var = tk.StringVar(value=self._default_saved_text("docker_server_memory", "3g"))
-        self.docker_server_swap_var = tk.StringVar(value=self._default_saved_text("docker_server_swap", "3500m"))
-        self.docker_client_cpus_var = tk.StringVar(value=self._default_saved_text("docker_client_cpus", "1.75"))
-        self.docker_client_memory_var = tk.StringVar(value=self._default_saved_text("docker_client_memory", "1200m"))
-        self.docker_client_swap_var = tk.StringVar(value=self._default_saved_text("docker_client_swap", "1500m"))
-        self.docker_fed_server_cpus_var = tk.StringVar(value=self._default_saved_text("docker_fed_server_cpus", "2"))
-        self.docker_fed_server_memory_var = tk.StringVar(value=self._default_saved_text("docker_fed_server_memory", "1500m"))
-        self.docker_fed_server_swap_var = tk.StringVar(value=self._default_saved_text("docker_fed_server_swap", "2g"))
-        self.docker_shm_size_var = tk.StringVar(value=self._default_saved_text("docker_shm_size", "2g"))
         self.partition_var = tk.StringVar(value=self._default_partition_label())
         self.partition_alpha_var = tk.StringVar(value=self._default_alpha_value())
         self.clients_var = tk.IntVar(value=max(1, _safe_int(self.defaults.get("max_rank"), 3)))
@@ -350,8 +378,6 @@ class ExperimentMenu:
         self.backward_quantization_addon_var = tk.StringVar(value=self._default_quantization_addon_label("backward_quantization"))
         self._syncing_quantization_fields = False
         self._syncing_mode_selection = False
-        self.docker_limits_window: Optional[tk.Toplevel] = None
-        self.docker_limits_summary_var = tk.StringVar(value="")
 
         self.status_var = tk.StringVar(value="Idle")
         self.command_preview_var = tk.StringVar(value="")
@@ -359,11 +385,8 @@ class ExperimentMenu:
         self._apply_saved_state()
         self._sync_fixed_pair_state()
         self._build_ui()
-        self._last_launch_backend = self._selected_launch_backend()
         self._update_partition_state()
         self._update_reduction_state()
-        self._update_docker_controls()
-        self._refresh_docker_limits_summary()
         self._refresh_command_preview()
         self.root.after(150, self._drain_ui_queue)
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
@@ -413,16 +436,6 @@ class ExperimentMenu:
             "dataset": self.dataset_var.get(),
             "device": self.device_var.get(),
             "launch_backend": self.launch_backend_var.get(),
-            "docker_server_cpus": self.docker_server_cpus_var.get(),
-            "docker_server_memory": self.docker_server_memory_var.get(),
-            "docker_server_swap": self.docker_server_swap_var.get(),
-            "docker_client_cpus": self.docker_client_cpus_var.get(),
-            "docker_client_memory": self.docker_client_memory_var.get(),
-            "docker_client_swap": self.docker_client_swap_var.get(),
-            "docker_fed_server_cpus": self.docker_fed_server_cpus_var.get(),
-            "docker_fed_server_memory": self.docker_fed_server_memory_var.get(),
-            "docker_fed_server_swap": self.docker_fed_server_swap_var.get(),
-            "docker_shm_size": self.docker_shm_size_var.get(),
             "partition": self.partition_var.get(),
             "partition_alpha": self.partition_alpha_var.get(),
             "clients": self.clients_var.get(),
@@ -451,13 +464,6 @@ class ExperimentMenu:
         primary = parts[0] if parts else "int"
         addon = parts[1] if len(parts) > 1 else "none"
         return primary, addon
-
-    def _default_saved_text(self, key: str, fallback: str) -> str:
-        value = self.saved_state.get(key)
-        if value is None:
-            return fallback
-        text = str(value).strip()
-        return text if text else fallback
 
     def _compose_quantization_pipeline(self, primary_label: str, addon_label: str) -> str:
         primary = self.quantization_map.get(primary_label, primary_label)
@@ -958,8 +964,6 @@ class ExperimentMenu:
         self._add_spin(form_panel, "Seed", self.seed_var, 0, 999999, 7, 2)
         self._add_combo(form_panel, "Device", self.device_var, [label for label, _ in DEVICE_OPTIONS], 8, 0)
         self._add_combo(form_panel, "Launch Backend", self.launch_backend_var, [label for label, _ in LAUNCH_BACKEND_OPTIONS], 8, 2)
-        self.docker_limits_button = ttk.Button(form_panel, text="Docker Limits", command=self._open_docker_limits_window, style="Action.TButton")
-        self.docker_limits_button.grid(row=8, column=4, sticky="ew", pady=(0, 6))
 
         self._add_section_label(form_panel, 9, "Communication Reduction")
         self.mode_combo = self._add_combo(form_panel, "Mode", self.comm_reduction_var, list(self.mode_selection_map.keys()), 10, 0)
@@ -1059,7 +1063,7 @@ class ExperimentMenu:
         ttk.Button(buttons, text="Add To Queue", command=self._add_job, style="Action.TButton").grid(row=0, column=0, sticky="ew", padx=(0, 8))
         ttk.Button(buttons, text="Run Queue", command=self._start_queue, style="Action.TButton").grid(row=0, column=1, sticky="ew", padx=4)
         ttk.Button(buttons, text="Run Now", command=self._run_now, style="Action.TButton").grid(row=0, column=2, sticky="ew", padx=4)
-        ttk.Button(buttons, text="Start MLflow UI", command=self._start_mlflow_server, style="Action.TButton").grid(row=0, column=3, sticky="ew", padx=(8, 0))
+        ttk.Button(buttons, text="Start Observability", command=self._start_mlflow_server, style="Action.TButton").grid(row=0, column=3, sticky="ew", padx=(8, 0))
 
         ttk.Label(queue_panel, text="Queue", style="Section.TLabel").grid(row=0, column=0, sticky="w")
         ttk.Label(queue_panel, textvariable=self.status_var, style="Status.TLabel").grid(row=1, column=0, sticky="w", pady=(2, 10))
@@ -1175,102 +1179,31 @@ class ExperimentMenu:
         entry.grid(row=row, column=column + 1, columnspan=columnspan, sticky="ew", padx=(0, 18), pady=(0, 6))
 
     def _handle_form_change(self, *_args: object) -> None:
-        current_backend = self._selected_launch_backend()
-        if current_backend != getattr(self, "_last_launch_backend", current_backend):
-            if current_backend == "docker":
-                self.root.after_idle(self._open_docker_limits_window)
-            self._last_launch_backend = current_backend
         self._sync_fixed_pair_state()
         self._update_partition_state()
         self._update_reduction_state()
-        self._update_docker_controls()
-        self._refresh_docker_limits_summary()
         self._sync_mode_selection_from_codecs()
         self._refresh_command_preview()
 
-    def _update_docker_controls(self) -> None:
-        if not hasattr(self, "docker_limits_button"):
-            return
-        state = "normal" if self._selected_launch_backend() == "docker" else "disabled"
-        self.docker_limits_button.configure(state=state)
-
-    def _parse_docker_cpu_value(self, value: str, label: str) -> float:
-        text = str(value or "").strip()
-        if not text:
-            raise ValueError(f"{label} is required.")
-        try:
-            numeric = float(text)
-        except ValueError as exc:
-            raise ValueError(f"{label} must be a number.") from exc
-        if numeric <= 0:
-            raise ValueError(f"{label} must be greater than 0.")
-        return numeric
-
-    def _parse_docker_memory_value(self, value: str, label: str) -> int:
-        text = str(value or "").strip().lower()
-        if not text:
-            raise ValueError(f"{label} is required.")
-        match = re.fullmatch(r"(\d+(?:\.\d+)?)([bkmg])?", text)
-        if not match:
-            raise ValueError(f"{label} must look like 512m or 2g.")
-        amount = float(match.group(1))
-        if amount <= 0:
-            raise ValueError(f"{label} must be greater than 0.")
-        units = {
-            None: 1,
-            "b": 1,
-            "k": 1024,
-            "m": 1024 ** 2,
-            "g": 1024 ** 3,
-        }
-        return int(amount * units[match.group(2)])
-
-    def _validate_docker_limit_settings(self) -> List[str]:
-        errors: List[str] = []
-        checks = (
-            (self.docker_server_cpus_var.get(), "Server CPUs", self._parse_docker_cpu_value),
-            (self.docker_server_memory_var.get(), "Server Memory", self._parse_docker_memory_value),
-            (self.docker_server_swap_var.get(), "Server Swap", self._parse_docker_memory_value),
-            (self.docker_client_cpus_var.get(), "Per-Client CPUs", self._parse_docker_cpu_value),
-            (self.docker_client_memory_var.get(), "Per-Client Memory", self._parse_docker_memory_value),
-            (self.docker_client_swap_var.get(), "Per-Client Swap", self._parse_docker_memory_value),
-            (self.docker_fed_server_cpus_var.get(), "FedServer CPUs", self._parse_docker_cpu_value),
-            (self.docker_fed_server_memory_var.get(), "FedServer Memory", self._parse_docker_memory_value),
-            (self.docker_fed_server_swap_var.get(), "FedServer Swap", self._parse_docker_memory_value),
-            (self.docker_shm_size_var.get(), "Shared Memory", self._parse_docker_memory_value),
-        )
-        for raw_value, label, parser in checks:
-            try:
-                parser(raw_value, label)
-            except ValueError as exc:
-                errors.append(str(exc))
-        return errors
-
     def _docker_requested_cpu_limit(self) -> float:
         clients = max(1, int(self.clients_var.get()))
-        server_cpu = self._parse_docker_cpu_value(self.docker_server_cpus_var.get(), "Server CPUs")
-        client_cpu = self._parse_docker_cpu_value(self.docker_client_cpus_var.get(), "Per-Client CPUs")
-        total_cpu = server_cpu + (clients * client_cpu)
+        total_cpu = DOCKER_SERVER_CPUS + (clients * DOCKER_CLIENT_CPUS)
         if self._selected_algorithm_uses_fed_server():
-            total_cpu += self._parse_docker_cpu_value(self.docker_fed_server_cpus_var.get(), "FedServer CPUs")
+            total_cpu += DOCKER_FED_SERVER_CPUS
         return total_cpu
 
     def _docker_requested_memory_limit(self) -> int:
         clients = max(1, int(self.clients_var.get()))
-        server_memory = self._parse_docker_memory_value(self.docker_server_memory_var.get(), "Server Memory")
-        client_memory = self._parse_docker_memory_value(self.docker_client_memory_var.get(), "Per-Client Memory")
-        total_memory = server_memory + (clients * client_memory)
+        total_memory = DOCKER_SERVER_MEMORY + (clients * DOCKER_CLIENT_MEMORY)
         if self._selected_algorithm_uses_fed_server():
-            total_memory += self._parse_docker_memory_value(self.docker_fed_server_memory_var.get(), "FedServer Memory")
+            total_memory += DOCKER_FED_SERVER_MEMORY
         return total_memory
 
     def _docker_requested_swap_limit(self) -> int:
         clients = max(1, int(self.clients_var.get()))
-        server_swap = self._parse_docker_memory_value(self.docker_server_swap_var.get(), "Server Swap")
-        client_swap = self._parse_docker_memory_value(self.docker_client_swap_var.get(), "Per-Client Swap")
-        total_swap = server_swap + (clients * client_swap)
+        total_swap = DOCKER_SERVER_SWAP + (clients * DOCKER_CLIENT_SWAP)
         if self._selected_algorithm_uses_fed_server():
-            total_swap += self._parse_docker_memory_value(self.docker_fed_server_swap_var.get(), "FedServer Swap")
+            total_swap += DOCKER_FED_SERVER_SWAP
         return total_swap
 
     def _docker_total_cpu_limit(self) -> float:
@@ -1298,99 +1231,6 @@ class ExperimentMenu:
     def _docker_total_swap_label(self) -> str:
         requested = self._format_memory_bytes_label(self._docker_requested_swap_limit())
         return f"{requested} requested -> {self._docker_container_swap_limit()} container cap"
-
-    def _refresh_docker_limits_summary(self) -> None:
-        try:
-            clients = max(1, int(self.clients_var.get()))
-            total_cpu = self._docker_total_cpu_limit()
-            total_memory = self._docker_total_memory_label()
-            total_swap = self._docker_total_swap_label()
-            shm_size = str(self.docker_shm_size_var.get()).strip().lower()
-            fed_summary = "FedServer disabled for this algorithm"
-            if self._selected_algorithm_uses_fed_server():
-                fed_summary = (
-                    f"FedServer: {self.docker_fed_server_cpus_var.get()} CPU / "
-                    f"{self.docker_fed_server_memory_var.get()} / swap {self.docker_fed_server_swap_var.get()}"
-                )
-            self.docker_limits_summary_var.set(
-                (
-                    f"Rank 0 server: {self.docker_server_cpus_var.get()} CPU / {self.docker_server_memory_var.get()} / swap {self.docker_server_swap_var.get()}\n"
-                    f"Clients x{clients}: {self.docker_client_cpus_var.get()} CPU / {self.docker_client_memory_var.get()} / swap {self.docker_client_swap_var.get()} each\n"
-                    f"{fed_summary}\n"
-                    f"Single MPI container target: {total_cpu:.2f} CPU, {total_memory}, {total_swap}, shm {shm_size}, GPU device 0 only"
-                )
-            )
-        except Exception:
-            self.docker_limits_summary_var.set("Current container target: invalid Docker limits")
-
-    def _save_docker_limits_window(self) -> None:
-        errors = self._validate_docker_limit_settings()
-        if errors:
-            messagebox.showerror("Invalid Docker Limits", "\n".join(errors), parent=self.docker_limits_window)
-            return
-        self._refresh_docker_limits_summary()
-        self._save_menu_state()
-        self._refresh_command_preview()
-        if self.docker_limits_window is not None and self.docker_limits_window.winfo_exists():
-            self.docker_limits_window.destroy()
-        self.docker_limits_window = None
-
-    def _open_docker_limits_window(self) -> None:
-        if self.docker_limits_window is not None and self.docker_limits_window.winfo_exists():
-            self.docker_limits_window.deiconify()
-            self.docker_limits_window.lift()
-            self.docker_limits_window.focus_force()
-            return
-
-        window = tk.Toplevel(self.root)
-        window.title("Docker Limits")
-        window.geometry("620x420")
-        window.resizable(False, False)
-        window.transient(self.root)
-        window.grab_set()
-        self.docker_limits_window = window
-
-        panel = ttk.Frame(window, style="Panel.TFrame", padding=16)
-        panel.pack(fill="both", expand=True)
-        panel.columnconfigure(1, weight=1)
-        panel.columnconfigure(3, weight=1)
-
-        ttk.Label(panel, text="Docker Resource Limits", style="Title.TLabel").grid(row=0, column=0, columnspan=4, sticky="w")
-        ttk.Label(
-            panel,
-            text="Current Docker backend runs one MPI container. Rank 0 keeps the only GPU, clients stay CPU-only, and SplitFed adds a FedServer block.",
-            style="Hint.TLabel",
-            wraplength=560,
-            justify="left",
-        ).grid(row=1, column=0, columnspan=4, sticky="w", pady=(6, 14))
-
-        self._add_entry(panel, "Server CPUs", self.docker_server_cpus_var, 2, 0)
-        self._add_entry(panel, "Server Memory", self.docker_server_memory_var, 2, 2)
-        self._add_entry(panel, "Server Swap", self.docker_server_swap_var, 3, 0)
-        self._add_entry(panel, "Per-Client CPUs", self.docker_client_cpus_var, 4, 0)
-        self._add_entry(panel, "Per-Client Memory", self.docker_client_memory_var, 4, 2)
-        self._add_entry(panel, "Per-Client Swap", self.docker_client_swap_var, 5, 0)
-        self._add_entry(panel, "FedServer CPUs", self.docker_fed_server_cpus_var, 6, 0)
-        self._add_entry(panel, "FedServer Memory", self.docker_fed_server_memory_var, 6, 2)
-        self._add_entry(panel, "FedServer Swap", self.docker_fed_server_swap_var, 7, 0)
-        self._add_entry(panel, "Shared Memory", self.docker_shm_size_var, 7, 2)
-
-        summary_label = ttk.Label(panel, textvariable=self.docker_limits_summary_var, style="Status.TLabel", wraplength=560, justify="left")
-        summary_label.grid(row=8, column=0, columnspan=4, sticky="w", pady=(14, 18))
-        self._refresh_docker_limits_summary()
-
-        buttons = ttk.Frame(panel, style="Panel.TFrame")
-        buttons.grid(row=9, column=0, columnspan=4, sticky="ew")
-        buttons.columnconfigure((0, 1), weight=1)
-        ttk.Button(buttons, text="Save", command=self._save_docker_limits_window, style="Action.TButton").grid(row=0, column=0, sticky="ew", padx=(0, 8))
-        ttk.Button(buttons, text="Close", command=window.destroy).grid(row=0, column=1, sticky="ew", padx=(8, 0))
-
-        def _close_window() -> None:
-            if self.docker_limits_window is not None and self.docker_limits_window.winfo_exists():
-                self.docker_limits_window.destroy()
-            self.docker_limits_window = None
-
-        window.protocol("WM_DELETE_WINDOW", _close_window)
 
     def _sync_quantization_direction_state(self) -> None:
         if self._syncing_quantization_fields:
@@ -1624,43 +1464,43 @@ class ExperimentMenu:
             f"{container_root}/setup/main.py",
             f"{container_root}/setup/config/config.yaml",
         )
-        command = [
+        return [
+            self.python_path,
+            str(DOCKER_MULTI_CONTAINER_LAUNCHER),
+            "--docker-path",
             self.docker_path,
-            "run",
-            "--rm",
-            "--init",
-            "-v",
-            f"{PROJECT_ROOT}:{container_root}",
-            "-w",
-            container_root,
-            "--cpus",
-            f"{self._docker_total_cpu_limit():.2f}",
-            "--memory",
-            self._docker_container_memory_limit(),
-            "--memory-swap",
-            self._docker_container_swap_limit(),
+            "--image",
+            DOCKER_IMAGE,
+            "--project-root",
+            str(PROJECT_ROOT),
+            "--device",
+            self.device_map[self.device_var.get()],
+            "--clients",
+            str(int(self.clients_var.get())),
+            "--server-cpus",
+            "5",
+            "--server-memory",
+            "3g",
+            "--server-swap",
+            "3500m",
+            "--client-cpus",
+            "1.75",
+            "--client-memory",
+            "1200m",
+            "--client-swap",
+            "1500m",
+            "--fed-server-cpus",
+            "2",
+            "--fed-server-memory",
+            "1500m",
+            "--fed-server-swap",
+            "2g",
             "--shm-size",
-            str(self.docker_shm_size_var.get()).strip().lower(),
-            "-e",
-            "OMP_NUM_THREADS=1",
-            "-e",
-            "MKL_NUM_THREADS=1",
-            "-e",
-            "OPENBLAS_NUM_THREADS=1",
+            DOCKER_SHM_SIZE,
+            *( ["--with-fed-server"] if self._selected_algorithm_uses_fed_server() else [] ),
+            "--",
+            *experiment_args,
         ]
-        if self.device_map[self.device_var.get()] == "gpu":
-            command.extend(["--gpus", "device=0"])
-        command.extend(
-            [
-                DOCKER_IMAGE,
-                "mpiexec",
-                "-np",
-                str(total_processes),
-                "python",
-                *experiment_args,
-            ]
-        )
-        return command
 
     def _build_command(self) -> List[str]:
         if self._selected_launch_backend() == "docker":
@@ -1669,7 +1509,6 @@ class ExperimentMenu:
 
     def _build_summary(self) -> str:
         clients = int(self.clients_var.get())
-        partition_value = self.partition_map[self.partition_var.get()]
         summary = [
             self.launch_backend_var.get(),
             self.algorithm_var.get(),
@@ -1732,8 +1571,6 @@ class ExperimentMenu:
             errors.append("Device must be cpu or gpu.")
         if self.launch_backend_var.get() not in self.launch_backend_map:
             errors.append("Launch backend must be Local MPI or Docker.")
-        if self._selected_launch_backend() == "docker":
-            errors.extend(self._validate_docker_limit_settings())
 
         selected_model = self.model_var.get()
         selected_dataset = self.dataset_var.get()
@@ -1789,11 +1626,13 @@ class ExperimentMenu:
             errors.append(f"Missing runner: {self.main_path}")
         if not self.config_path.exists():
             errors.append(f"Missing config: {self.config_path}")
-        if self._selected_launch_backend() == "docker" and shutil_which(self.docker_path) is None:
-            errors.append("Docker backend requires the docker CLI on PATH.")
+        if self._selected_launch_backend() == "docker" and not _tool_exists(self.docker_path):
+            errors.append("Docker backend requires docker.exe. Install Docker Desktop or add docker.exe to PATH.")
         if self._selected_launch_backend() == "docker" and not (DOCKER_DIR / "Dockerfile").exists():
             errors.append(f"Docker backend requires {DOCKER_DIR / 'Dockerfile'}.")
-        if self._selected_launch_backend() == "mpi" and shutil_which(self.mpiexec_path) is None:
+        if self._selected_launch_backend() == "docker" and not DOCKER_MULTI_CONTAINER_LAUNCHER.exists():
+            errors.append(f"Docker backend requires {DOCKER_MULTI_CONTAINER_LAUNCHER}.")
+        if self._selected_launch_backend() == "mpi" and not _tool_exists(self.mpiexec_path):
             errors.append("Local MPI backend requires mpiexec on PATH.")
 
         return errors
@@ -1836,8 +1675,11 @@ class ExperimentMenu:
     def _mlflow_tracking_uri(self) -> str:
         return (PROJECT_ROOT / "runtime" / "mlflow" / "mlruns").resolve().as_uri()
 
+    def _local_mlflow_ui_url(self) -> str:
+        return f"http://127.0.0.1:{MLFLOW_UI_PORT}"
+
     def _mlflow_ui_url(self) -> str:
-        return "http://127.0.0.1:5000"
+        return OBSERVABILITY_DASHBOARD_URL
 
     def _is_port_open(self, host: str, port: int) -> bool:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
@@ -1845,28 +1687,65 @@ class ExperimentMenu:
             return sock.connect_ex((host, port)) == 0
 
     def _start_mlflow_server(self) -> None:
-        if self._is_port_open("127.0.0.1", 5000):
-            self.status_var.set("MLflow UI already running")
-            self.output_box.insert("end", f"MLflow UI already running at {self._mlflow_ui_url()}\n")
+        if self._is_port_open("127.0.0.1", OBSERVABILITY_UI_PORT):
+            self.status_var.set("Observability UI already running")
+            self.output_box.insert("end", f"Observability UI already running at {self._mlflow_ui_url()}\n")
             self.output_box.see("end")
             webbrowser.open(self._mlflow_ui_url())
             return
 
+        if not KUBERNETES_START_SCRIPT.exists():
+            messagebox.showerror("Observability Missing", f"Could not find {KUBERNETES_START_SCRIPT}")
+            return
+
+        if not self._is_port_open("127.0.0.1", MLFLOW_UI_PORT):
+            command = [
+                self.python_path,
+                "-m",
+                "mlflow",
+                "ui",
+                "--backend-store-uri",
+                self._mlflow_tracking_uri(),
+                "--host",
+                "127.0.0.1",
+                "--port",
+                str(MLFLOW_UI_PORT),
+            ]
+            creation_flags = getattr(subprocess, "CREATE_NEW_CONSOLE", 0)
+            try:
+                self.mlflow_process = subprocess.Popen(
+                    command,
+                    cwd=str(PROJECT_ROOT),
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    creationflags=creation_flags,
+                )
+            except FileNotFoundError:
+                messagebox.showerror("MLflow Missing", "Could not start MLflow. Python executable was not found.")
+                return
+            except Exception as exc:
+                messagebox.showerror("MLflow Failed", f"Failed to start MLflow UI: {exc}")
+                return
+            self.output_box.insert("end", f"Starting MLflow UI with: {self._quoted_command(command)}\n")
+            self.output_box.see("end")
+
+        if self.observability_process is not None and self.observability_process.poll() is None:
+            self.status_var.set("Observability UI starting...")
+            self.root.after(3000, self._finalize_mlflow_launch)
+            return
+
         command = [
-            self.python_path,
-            "-m",
-            "mlflow",
-            "ui",
-            "--backend-store-uri",
-            self._mlflow_tracking_uri(),
-            "--host",
-            "127.0.0.1",
-            "--port",
-            "5000",
+            "powershell",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            str(KUBERNETES_START_SCRIPT),
+            "-ProjectRoot",
+            str(PROJECT_ROOT),
         ]
         creation_flags = getattr(subprocess, "CREATE_NEW_CONSOLE", 0)
         try:
-            self.mlflow_process = subprocess.Popen(
+            self.observability_process = subprocess.Popen(
                 command,
                 cwd=str(PROJECT_ROOT),
                 stdout=subprocess.DEVNULL,
@@ -1874,27 +1753,28 @@ class ExperimentMenu:
                 creationflags=creation_flags,
             )
         except FileNotFoundError:
-            messagebox.showerror("MLflow Missing", "Could not start MLflow. Python executable was not found.")
+            messagebox.showerror("Observability Missing", "Could not start PowerShell for the Kubernetes observability stack.")
             return
         except Exception as exc:
-            messagebox.showerror("MLflow Failed", f"Failed to start MLflow UI: {exc}")
+            messagebox.showerror("Observability Failed", f"Failed to start the observability stack: {exc}")
             return
 
-        self.status_var.set("Starting MLflow UI...")
-        self.output_box.insert("end", f"Starting MLflow UI with: {self._quoted_command(command)}\n")
+        self.status_var.set("Starting observability UI...")
+        self.output_box.insert("end", f"Starting observability stack with: {self._quoted_command(command)}\n")
         self.output_box.see("end")
-        self.root.after(1200, self._finalize_mlflow_launch)
+        self.root.after(5000, self._finalize_mlflow_launch)
 
     def _finalize_mlflow_launch(self) -> None:
-        if self._is_port_open("127.0.0.1", 5000):
-            self.status_var.set("MLflow UI running")
-            self.output_box.insert("end", f"MLflow UI running at {self._mlflow_ui_url()}\n")
+        if self._is_port_open("127.0.0.1", OBSERVABILITY_UI_PORT):
+            self.status_var.set("Observability UI running")
+            self.output_box.insert("end", f"Observability UI running at {self._mlflow_ui_url()}\n")
+            self.output_box.insert("end", f"MLflow UI remains available at {self._local_mlflow_ui_url()}\n")
             self.output_box.see("end")
             webbrowser.open(self._mlflow_ui_url())
             return
 
-        self.status_var.set("MLflow UI failed to start")
-        self.output_box.insert("end", "MLflow UI did not start on port 5000. Check the spawned console for details.\n")
+        self.status_var.set("Observability UI failed to start")
+        self.output_box.insert("end", "Grafana did not start on port 4000. Check the spawned PowerShell console for details.\n")
         self.output_box.see("end")
 
     def _remove_selected(self) -> None:
@@ -2039,15 +1919,22 @@ class ExperimentMenu:
     def _on_close(self) -> None:
         if self.running and not messagebox.askyesno("Exit Launcher", "A run is still active. Stop it and close the launcher?"):
             return
-        if self.docker_limits_window is not None and self.docker_limits_window.winfo_exists():
-            self.docker_limits_window.destroy()
-            self.docker_limits_window = None
         self._save_menu_state()
         self._stop_current_run()
         if self.mlflow_process is not None and self.mlflow_process.poll() is None:
             try:
                 subprocess.run(
                     ["taskkill", "/PID", str(self.mlflow_process.pid), "/T", "/F"],
+                    check=False,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+            except Exception:
+                pass
+        if self.observability_process is not None and self.observability_process.poll() is None:
+            try:
+                subprocess.run(
+                    ["taskkill", "/PID", str(self.observability_process.pid), "/T", "/F"],
                     check=False,
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL,

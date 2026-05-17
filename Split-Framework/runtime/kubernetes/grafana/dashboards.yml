@@ -1,0 +1,11 @@
+apiVersion: 1
+
+providers:
+  - name: Split-Framework
+    orgId: 1
+    folder: Split-Framework
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 10
+    options:
+      path: /var/lib/grafana/dashboards
