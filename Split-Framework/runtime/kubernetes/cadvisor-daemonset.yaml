@@ -15,7 +15,6 @@ spec:
         - name: cadvisor
           image: gcr.io/cadvisor/cadvisor:v0.49.1
           args:
-            - --docker_only=true
             - --housekeeping_interval=5s
             - --store_container_labels=true
           ports:

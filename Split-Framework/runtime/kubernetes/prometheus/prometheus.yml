@@ -13,7 +13,7 @@ scrape_configs:
       - targets:
           - cadvisor:8080
 
-  - job_name: dcgm-exporter
+  - job_name: kepler
     static_configs:
       - targets:
-          - dcgm-exporter:9400
+          - kepler:28282

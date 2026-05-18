@@ -33,9 +33,9 @@ kubectl rollout status -n $namespace deployment/prometheus --timeout=180s | Out-
 kubectl rollout status -n $namespace deployment/grafana --timeout=180s | Out-String | Write-Output
 kubectl rollout status -n $namespace daemonset/cadvisor --timeout=180s | Out-String | Write-Output
 try {
-    kubectl rollout status -n $namespace daemonset/dcgm-exporter --timeout=120s | Out-String | Write-Output
+    kubectl rollout status -n $namespace daemonset/kepler --timeout=120s | Out-String | Write-Output
 } catch {
-    Write-Warning "dcgm-exporter did not become ready. GPU energy panels will stay empty until Kubernetes exposes the NVIDIA runtime."
+    Write-Warning "Kepler did not become ready. Energy panels will stay empty until the node exposes the required power counters."
 }
 
 Write-Output "Grafana will be available at http://127.0.0.1:4000"

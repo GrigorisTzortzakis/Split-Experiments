@@ -9,6 +9,9 @@ configMapGenerator:
   - name: prometheus-config
     files:
       - prometheus/prometheus.yml
+  - name: kepler-config
+    files:
+      - kepler/config.yaml
   - name: grafana-datasources
     files:
       - grafana/datasources.yml
@@ -24,4 +27,4 @@ resources:
   - prometheus-deployment.yaml
   - grafana-deployment.yaml
   - cadvisor-daemonset.yaml
-  - dcgm-exporter-daemonset.yaml
+  - kepler-daemonset.yaml

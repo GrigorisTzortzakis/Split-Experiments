@@ -1,0 +1,68 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: kepler
+spec:
+  selector:
+    matchLabels:
+      app: kepler
+  template:
+    metadata:
+      labels:
+        app: kepler
+    spec:
+      hostPID: true
+      containers:
+        - name: kepler
+          image: quay.io/sustainable_computing_io/kepler:latest
+          securityContext:
+            privileged: true
+          ports:
+            - containerPort: 28282
+              name: metrics
+          volumeMounts:
+            - name: kepler-config
+              mountPath: /etc/kepler/config.yaml
+              subPath: config.yaml
+            - name: proc
+              mountPath: /host/proc
+              readOnly: true
+            - name: sys
+              mountPath: /host/sys
+              readOnly: true
+            - name: cgroup
+              mountPath: /sys/fs/cgroup
+              readOnly: true
+            - name: pod-resources
+              mountPath: /var/lib/kubelet/pod-resources
+              readOnly: true
+      tolerations:
+        - operator: Exists
+      volumes:
+        - name: kepler-config
+          configMap:
+            name: kepler-config
+        - name: proc
+          hostPath:
+            path: /proc
+        - name: sys
+          hostPath:
+            path: /sys
+        - name: cgroup
+          hostPath:
+            path: /sys/fs/cgroup
+        - name: pod-resources
+          hostPath:
+            path: /var/lib/kubelet/pod-resources
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kepler
+spec:
+  selector:
+    app: kepler
+  ports:
+    - name: metrics
+      port: 28282
+      targetPort: 28282

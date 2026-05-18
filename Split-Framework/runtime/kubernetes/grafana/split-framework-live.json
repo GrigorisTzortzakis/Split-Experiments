@@ -74,13 +74,13 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "sum by (name) (rate(container_cpu_usage_seconds_total{name=~\"$container\", image!=\"\"}[1m]))",
-          "legendFormat": "{{name}}",
+          "expr": "sum by (pod) (rate(container_cpu_usage_seconds_total{namespace=\"split-framework-runs\", pod=~\"$pod\", container!=\"\"}[1m]))",
+          "legendFormat": "{{pod}}",
           "range": true,
           "refId": "A"
         }
       ],
-      "title": "Container CPU Usage",
+      "title": "Pod CPU Usage",
       "type": "timeseries"
     },
     {
@@ -123,13 +123,13 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "sum by (name) (container_memory_working_set_bytes{name=~\"$container\", image!=\"\"}) / 1073741824",
-          "legendFormat": "{{name}}",
+          "expr": "sum by (pod) (container_memory_working_set_bytes{namespace=\"split-framework-runs\", pod=~\"$pod\", container!=\"\"}) / 1073741824",
+          "legendFormat": "{{pod}}",
           "range": true,
           "refId": "A"
         }
       ],
-      "title": "Container Memory Working Set",
+      "title": "Pod Memory Working Set",
       "type": "timeseries"
     },
     {
@@ -172,8 +172,8 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "sum by (name) (rate(container_network_receive_bytes_total{name=~\"$container\", image!=\"\"}[1m])) / 1048576",
-          "legendFormat": "{{name}} rx",
+          "expr": "sum by (pod) (rate(container_network_receive_bytes_total{namespace=\"split-framework-runs\", pod=~\"$pod\"}[1m])) / 1048576",
+          "legendFormat": "{{pod}} rx",
           "range": true,
           "refId": "A"
         },
@@ -183,13 +183,13 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "sum by (name) (rate(container_network_transmit_bytes_total{name=~\"$container\", image!=\"\"}[1m])) / 1048576",
-          "legendFormat": "{{name}} tx",
+          "expr": "sum by (pod) (rate(container_network_transmit_bytes_total{namespace=\"split-framework-runs\", pod=~\"$pod\"}[1m])) / 1048576",
+          "legendFormat": "{{pod}} tx",
           "range": true,
           "refId": "B"
         }
       ],
-      "title": "Container Network Throughput",
+      "title": "Pod Network Throughput",
       "type": "timeseries"
     },
     {
@@ -232,150 +232,14 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "sum by (name) (container_memory_working_set_bytes{name=~\"$container\", image!=\"\"} / container_spec_memory_limit_bytes{name=~\"$container\", image!=\"\"})",
-          "legendFormat": "{{name}}",
+          "expr": "sum by (pod) (container_memory_working_set_bytes{namespace=\"split-framework-runs\", pod=~\"$pod\", container!=\"\"}) / clamp_min(sum by (pod) (container_spec_memory_limit_bytes{namespace=\"split-framework-runs\", pod=~\"$pod\", container!=\"\"}), 1)",
+          "legendFormat": "{{pod}}",
           "range": true,
           "refId": "A"
         }
       ],
-      "title": "Container Memory Limit Usage",
+      "title": "Pod Memory Limit Usage",
       "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "thresholds"
-          },
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "orange",
-                "value": 150
-              },
-              {
-                "color": "red",
-                "value": 250
-              }
-            ]
-          },
-          "unit": "watt"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 6,
-        "x": 0,
-        "y": 16
-      },
-      "id": 5,
-      "options": {
-        "colorMode": "value",
-        "graphMode": "area",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "textMode": "value_and_name"
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "editorMode": "code",
-          "expr": "sum(DCGM_FI_DEV_POWER_USAGE)",
-          "legendFormat": "GPU power",
-          "range": true,
-          "refId": "A"
-        }
-      ],
-      "title": "GPU Power Draw",
-      "type": "stat"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "thresholds"
-          },
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "orange",
-                "value": 10000
-              },
-              {
-                "color": "red",
-                "value": 50000
-              }
-            ]
-          },
-          "unit": "joule"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 6,
-        "x": 6,
-        "y": 16
-      },
-      "id": 6,
-      "options": {
-        "colorMode": "value",
-        "graphMode": "area",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "textMode": "value_and_name"
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "editorMode": "code",
-          "expr": "sum(increase(DCGM_FI_DEV_TOTAL_ENERGY_CONSUMPTION[5m])) / 1000",
-          "legendFormat": "GPU energy last 5m",
-          "range": true,
-          "refId": "A"
-        }
-      ],
-      "title": "GPU Energy Last 5m",
-      "type": "stat"
     },
     {
       "datasource": {
@@ -387,7 +251,56 @@
           "color": {
             "mode": "palette-classic"
           },
-          "unit": "decmbytes"
+          "unit": "joule"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 16
+      },
+      "id": 5,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "sum by (pod_name) (increase(kepler_container_joules_total{pod_name=~\"$pod\"}[5m]))",
+          "legendFormat": "{{pod_name}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Pod Energy Last 5m",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "unit": "watt"
         },
         "overrides": []
       },
@@ -396,6 +309,55 @@
         "w": 12,
         "x": 12,
         "y": 16
+      },
+      "id": 6,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "sum by (pod_name) (rate(kepler_container_joules_total{pod_name=~\"$pod\"}[1m]))",
+          "legendFormat": "{{pod_name}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Estimated Pod Power",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "unit": "joule"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 24
       },
       "id": 7,
       "options": {
@@ -417,13 +379,13 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "DCGM_FI_DEV_FB_USED",
-          "legendFormat": "GPU {{gpu}}",
+          "expr": "increase(kepler_node_joules_total[5m])",
+          "legendFormat": "node energy",
           "range": true,
           "refId": "A"
         }
       ],
-      "title": "GPU Framebuffer Used",
+      "title": "Node Energy Last 5m",
       "type": "timeseries"
     }
   ],
@@ -433,7 +395,7 @@
   "tags": [
     "split-framework",
     "kubernetes",
-    "observability"
+    "kepler"
   ],
   "templating": {
     "list": [
@@ -445,8 +407,8 @@
         },
         "hide": 0,
         "includeAll": false,
-        "label": "Container regex",
-        "name": "container",
+        "label": "Pod regex",
+        "name": "pod",
         "options": [],
         "query": "split-framework-.*",
         "skipUrlSync": false,
@@ -462,6 +424,6 @@
   "timezone": "browser",
   "title": "Split-Framework Live Containers",
   "uid": "split-framework-live",
-  "version": 1,
+  "version": 2,
   "weekStart": ""
 }

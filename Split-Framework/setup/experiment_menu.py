@@ -33,7 +33,7 @@ PROJECT_ROOT = SETUP_DIR.parent
 DOCKER_DIR = PROJECT_ROOT / "runtime" / "docker"
 KUBERNETES_DIR = PROJECT_ROOT / "runtime" / "kubernetes"
 DOCKER_IMAGE = "split-framework-runner:latest"
-DOCKER_MULTI_CONTAINER_LAUNCHER = DOCKER_DIR / "launch_multi_container.py"
+KUBERNETES_MULTI_POD_LAUNCHER = KUBERNETES_DIR / "launch_kubernetes.py"
 KUBERNETES_START_SCRIPT = KUBERNETES_DIR / "start_observability.ps1"
 OBSERVABILITY_UI_PORT = 4000
 MLFLOW_UI_PORT = 5000
@@ -88,7 +88,8 @@ MODEL_OPTIONS: List[Tuple[str, str]] = [
 ]
 DATASET_OPTIONS: List[str] = ["cifar10", "cifar100", "ag_news"]
 DEVICE_OPTIONS: List[Tuple[str, str]] = [("gpu", "gpu"), ("cpu", "cpu")]
-LAUNCH_BACKEND_OPTIONS: List[Tuple[str, str]] = [("Local MPI", "mpi"), ("Docker", "docker")]
+LAUNCH_BACKEND_OPTIONS: List[Tuple[str, str]] = [("Local MPI", "mpi"), ("Kubernetes", "kubernetes")]
+UI_DESTINATION_OPTIONS: List[Tuple[str, str]] = [("MLflow", "mlflow"), ("Grafana", "grafana")]
 SUPPORTED_DATASETS_BY_MODEL: Dict[str, Tuple[str, ...]] = {
     "resnet18": ("cifar10",),
     "densenet121": ("cifar10",),
@@ -256,11 +257,38 @@ def _find_docker() -> str:
     return "docker"
 
 
+def _find_kubectl() -> str:
+    candidates = ["kubectl.exe", "kubectl"]
+    for candidate in candidates:
+        resolved = shutil_which(candidate)
+        if resolved:
+            return resolved
+    windows_candidates = [
+        Path("C:/Program Files/Docker/Docker/resources/bin/kubectl.exe"),
+        Path.home() / "AppData" / "Local" / "Programs" / "Docker" / "Docker" / "resources" / "bin" / "kubectl.exe",
+    ]
+    for candidate in windows_candidates:
+        if candidate.exists():
+            return str(candidate)
+    return "kubectl"
+
+
 def _tool_exists(command: str) -> bool:
     candidate = Path(command)
     if candidate.is_absolute():
         return candidate.exists()
     return shutil_which(command) is not None
+
+
+def _run_json_command(command: Sequence[str]) -> Optional[object]:
+    try:
+        completed = subprocess.run(command, check=True, capture_output=True, text=True)
+    except Exception:
+        return None
+    try:
+        return json.loads(completed.stdout)
+    except Exception:
+        return None
 
 
 def shutil_which(name: str) -> Optional[str]:
@@ -321,6 +349,7 @@ class ExperimentMenu:
         self.saved_state = self._load_menu_state()
         self.mpiexec_path = _find_mpiexec()
         self.docker_path = _find_docker()
+        self.kubectl_path = _find_kubectl()
         self.python_path = _find_python_executable()
 
         self.jobs: List[Job] = []
@@ -337,6 +366,7 @@ class ExperimentMenu:
         self.model_map: Dict[str, str] = {label: value for label, value in MODEL_OPTIONS}
         self.device_map: Dict[str, str] = {label: value for label, value in DEVICE_OPTIONS}
         self.launch_backend_map: Dict[str, str] = {label: value for label, value in LAUNCH_BACKEND_OPTIONS}
+        self.ui_destination_map: Dict[str, str] = {label: value for label, value in UI_DESTINATION_OPTIONS}
         self.partition_map: Dict[str, str] = {label: value for label, value, _alpha in PARTITION_OPTIONS}
         self.partition_alpha_map: Dict[str, Optional[float]] = {label: alpha for label, _value, alpha in PARTITION_OPTIONS}
         self.comm_reduction_map: Dict[str, str] = {label: value for label, value in COMM_REDUCTION_OPTIONS}
@@ -354,6 +384,7 @@ class ExperimentMenu:
         self.dataset_var = tk.StringVar(value=str(self.defaults.get("dataset") or DATASET_OPTIONS[0]))
         self.device_var = tk.StringVar(value=self._default_device_label())
         self.launch_backend_var = tk.StringVar(value=self._default_launch_backend_label())
+        self.ui_destination_var = tk.StringVar(value=str(self.saved_state.get("ui_destination") or UI_DESTINATION_OPTIONS[0][0]))
         self.partition_var = tk.StringVar(value=self._default_partition_label())
         self.partition_alpha_var = tk.StringVar(value=self._default_alpha_value())
         self.clients_var = tk.IntVar(value=max(1, _safe_int(self.defaults.get("max_rank"), 3)))
@@ -436,6 +467,7 @@ class ExperimentMenu:
             "dataset": self.dataset_var.get(),
             "device": self.device_var.get(),
             "launch_backend": self.launch_backend_var.get(),
+            "ui_destination": self.ui_destination_var.get(),
             "partition": self.partition_var.get(),
             "partition_alpha": self.partition_alpha_var.get(),
             "clients": self.clients_var.get(),
@@ -1063,7 +1095,16 @@ class ExperimentMenu:
         ttk.Button(buttons, text="Add To Queue", command=self._add_job, style="Action.TButton").grid(row=0, column=0, sticky="ew", padx=(0, 8))
         ttk.Button(buttons, text="Run Queue", command=self._start_queue, style="Action.TButton").grid(row=0, column=1, sticky="ew", padx=4)
         ttk.Button(buttons, text="Run Now", command=self._run_now, style="Action.TButton").grid(row=0, column=2, sticky="ew", padx=4)
-        ttk.Button(buttons, text="Start Observability", command=self._start_mlflow_server, style="Action.TButton").grid(row=0, column=3, sticky="ew", padx=(8, 0))
+        observability_controls = ttk.Frame(buttons, style="Panel.TFrame")
+        observability_controls.grid(row=0, column=3, sticky="ew", padx=(8, 0))
+        observability_controls.columnconfigure(1, weight=1)
+        ttk.Button(observability_controls, text="Open", command=self._open_selected_ui, style="Action.TButton").grid(row=0, column=0, sticky="ew", padx=(0, 6))
+        ttk.Combobox(
+            observability_controls,
+            textvariable=self.ui_destination_var,
+            values=[label for label, _ in UI_DESTINATION_OPTIONS],
+            state="readonly",
+        ).grid(row=0, column=1, sticky="ew")
 
         ttk.Label(queue_panel, text="Queue", style="Section.TLabel").grid(row=0, column=0, sticky="w")
         ttk.Label(queue_panel, textvariable=self.status_var, style="Status.TLabel").grid(row=1, column=0, sticky="w", pady=(2, 10))
@@ -1458,17 +1499,17 @@ class ExperimentMenu:
             *experiment_args,
         ]
 
-    def _build_docker_command(self) -> List[str]:
+    def _build_kubernetes_command(self) -> List[str]:
         container_root = "/workspace/Split-Framework"
-        experiment_args, total_processes, _active_clients = self._build_experiment_args(
+        experiment_args, _total_processes, _active_clients = self._build_experiment_args(
             f"{container_root}/setup/main.py",
             f"{container_root}/setup/config/config.yaml",
         )
         return [
             self.python_path,
-            str(DOCKER_MULTI_CONTAINER_LAUNCHER),
-            "--docker-path",
-            self.docker_path,
+            str(KUBERNETES_MULTI_POD_LAUNCHER),
+            "--kubectl-path",
+            self.kubectl_path,
             "--image",
             DOCKER_IMAGE,
             "--project-root",
@@ -1503,8 +1544,8 @@ class ExperimentMenu:
         ]
 
     def _build_command(self) -> List[str]:
-        if self._selected_launch_backend() == "docker":
-            return self._build_docker_command()
+        if self._selected_launch_backend() == "kubernetes":
+            return self._build_kubernetes_command()
         return self._build_mpi_command()
 
     def _build_summary(self) -> str:
@@ -1519,9 +1560,9 @@ class ExperimentMenu:
             self.partition_var.get(),
             f"{int(self.epochs_var.get())} epochs",
         ]
-        if self._selected_launch_backend() == "docker":
+        if self._selected_launch_backend() == "kubernetes":
             summary.append(
-                f"docker-limit {self._docker_total_cpu_limit():.2f}cpu/{self._docker_container_memory_limit()}/swap {self._docker_container_swap_limit()}"
+                f"k8s-limit {self._docker_total_cpu_limit():.2f}cpu/{self._docker_container_memory_limit()}"
             )
         reduction_mode, _selected_method = self._resolve_mode_selection()
         if reduction_mode != "none":
@@ -1570,7 +1611,7 @@ class ExperimentMenu:
         if self.device_var.get() not in self.device_map:
             errors.append("Device must be cpu or gpu.")
         if self.launch_backend_var.get() not in self.launch_backend_map:
-            errors.append("Launch backend must be Local MPI or Docker.")
+            errors.append("Launch backend must be Local MPI or Kubernetes.")
 
         selected_model = self.model_var.get()
         selected_dataset = self.dataset_var.get()
@@ -1626,12 +1667,20 @@ class ExperimentMenu:
             errors.append(f"Missing runner: {self.main_path}")
         if not self.config_path.exists():
             errors.append(f"Missing config: {self.config_path}")
-        if self._selected_launch_backend() == "docker" and not _tool_exists(self.docker_path):
-            errors.append("Docker backend requires docker.exe. Install Docker Desktop or add docker.exe to PATH.")
-        if self._selected_launch_backend() == "docker" and not (DOCKER_DIR / "Dockerfile").exists():
-            errors.append(f"Docker backend requires {DOCKER_DIR / 'Dockerfile'}.")
-        if self._selected_launch_backend() == "docker" and not DOCKER_MULTI_CONTAINER_LAUNCHER.exists():
-            errors.append(f"Docker backend requires {DOCKER_MULTI_CONTAINER_LAUNCHER}.")
+        if self._selected_launch_backend() == "kubernetes" and not _tool_exists(self.kubectl_path):
+            errors.append("Kubernetes backend requires kubectl. Enable Docker Desktop Kubernetes or add kubectl to PATH.")
+        if self._selected_launch_backend() == "kubernetes" and not (DOCKER_DIR / "Dockerfile").exists():
+            errors.append(f"Kubernetes backend requires {DOCKER_DIR / 'Dockerfile'}.")
+        if self._selected_launch_backend() == "kubernetes" and not KUBERNETES_MULTI_POD_LAUNCHER.exists():
+            errors.append(f"Kubernetes backend requires {KUBERNETES_MULTI_POD_LAUNCHER}.")
+        if self._selected_launch_backend() == "kubernetes":
+            current_context = self._kubectl_current_context()
+            if current_context.startswith("k3d-") and not _tool_exists(self.docker_path):
+                errors.append("Kubernetes backend on k3d requires docker.exe so the runner image can be imported into the k3d node containers.")
+            if self.device_map.get(self.device_var.get()) == "gpu":
+                total_gpus = self._kubernetes_allocatable_gpus()
+                if total_gpus == 0:
+                    errors.append("Kubernetes backend requested GPU, but the active cluster exposes no allocatable nvidia.com/gpu resources.")
         if self._selected_launch_backend() == "mpi" and not _tool_exists(self.mpiexec_path):
             errors.append("Local MPI backend requires mpiexec on PATH.")
 
@@ -1681,17 +1730,55 @@ class ExperimentMenu:
     def _mlflow_ui_url(self) -> str:
         return OBSERVABILITY_DASHBOARD_URL
 
+    def _open_selected_ui(self) -> None:
+        destination = self.ui_destination_map.get(self.ui_destination_var.get(), "mlflow")
+        if destination == "grafana":
+            self._start_mlflow_server(open_target="grafana")
+            return
+        self._start_mlflow_server(open_target="mlflow")
+
     def _is_port_open(self, host: str, port: int) -> bool:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
             sock.settimeout(0.3)
             return sock.connect_ex((host, port)) == 0
 
-    def _start_mlflow_server(self) -> None:
-        if self._is_port_open("127.0.0.1", OBSERVABILITY_UI_PORT):
+    def _kubectl_current_context(self) -> str:
+        try:
+            completed = subprocess.run(
+                [self.kubectl_path, "config", "current-context"],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+        except Exception:
+            return ""
+        return completed.stdout.strip()
+
+    def _kubernetes_allocatable_gpus(self) -> Optional[int]:
+        data = _run_json_command([self.kubectl_path, "get", "nodes", "-o", "json"])
+        if not isinstance(data, dict):
+            return None
+        total = 0
+        for item in data.get("items", []):
+            allocatable = item.get("status", {}).get("allocatable", {})
+            try:
+                total += int(str(allocatable.get("nvidia.com/gpu", "0")))
+            except (TypeError, ValueError):
+                continue
+        return total
+
+    def _start_mlflow_server(self, open_target: str = "grafana") -> None:
+        if open_target == "grafana" and self._is_port_open("127.0.0.1", OBSERVABILITY_UI_PORT):
             self.status_var.set("Observability UI already running")
             self.output_box.insert("end", f"Observability UI already running at {self._mlflow_ui_url()}\n")
             self.output_box.see("end")
             webbrowser.open(self._mlflow_ui_url())
+            return
+        if open_target == "mlflow" and self._is_port_open("127.0.0.1", MLFLOW_UI_PORT):
+            self.status_var.set("MLflow UI already running")
+            self.output_box.insert("end", f"MLflow UI already running at {self._local_mlflow_ui_url()}\n")
+            self.output_box.see("end")
+            webbrowser.open(self._local_mlflow_ui_url())
             return
 
         if not KUBERNETES_START_SCRIPT.exists():
@@ -1729,9 +1816,14 @@ class ExperimentMenu:
             self.output_box.insert("end", f"Starting MLflow UI with: {self._quoted_command(command)}\n")
             self.output_box.see("end")
 
+        if open_target == "mlflow":
+            self.status_var.set("Starting MLflow UI...")
+            self.root.after(1500, lambda: self._finalize_mlflow_launch(open_target))
+            return
+
         if self.observability_process is not None and self.observability_process.poll() is None:
             self.status_var.set("Observability UI starting...")
-            self.root.after(3000, self._finalize_mlflow_launch)
+            self.root.after(3000, lambda: self._finalize_mlflow_launch(open_target))
             return
 
         command = [
@@ -1762,9 +1854,21 @@ class ExperimentMenu:
         self.status_var.set("Starting observability UI...")
         self.output_box.insert("end", f"Starting observability stack with: {self._quoted_command(command)}\n")
         self.output_box.see("end")
-        self.root.after(5000, self._finalize_mlflow_launch)
+        self.root.after(5000, lambda: self._finalize_mlflow_launch(open_target))
 
-    def _finalize_mlflow_launch(self) -> None:
+    def _finalize_mlflow_launch(self, open_target: str = "grafana") -> None:
+        if open_target == "mlflow":
+            if self._is_port_open("127.0.0.1", MLFLOW_UI_PORT):
+                self.status_var.set("MLflow UI running")
+                self.output_box.insert("end", f"MLflow UI running at {self._local_mlflow_ui_url()}\n")
+                self.output_box.see("end")
+                webbrowser.open(self._local_mlflow_ui_url())
+                return
+            self.status_var.set("MLflow UI failed to start")
+            self.output_box.insert("end", "MLflow did not start on port 5000. Check the spawned console for details.\n")
+            self.output_box.see("end")
+            return
+
         if self._is_port_open("127.0.0.1", OBSERVABILITY_UI_PORT):
             self.status_var.set("Observability UI running")
             self.output_box.insert("end", f"Observability UI running at {self._mlflow_ui_url()}\n")
