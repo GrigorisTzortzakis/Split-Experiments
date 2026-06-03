@@ -16,10 +16,14 @@ import torch
 import logging
 import sys
 import random
+import threading
+import time
 from pathlib import Path
 from datetime import datetime
 import argparse
 import numpy as np
+from urllib import error as urllib_error
+from urllib import request as urllib_request
 
 # Ensure project root (Split-Framework/) is on sys.path so imports work reliably.
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -34,6 +38,165 @@ from datasets.Dataset_Picker import datasetFactory
 from runtime.exports.config import yaml_config
 from models.model_factory import model_factory
 from runtime.MPI.start_MPI import SplitNN_distributed, SplitNN_init
+
+
+OBSERVABILITY_METRIC_ALIASES = {
+    "cpu_package_power_w": ("hwi_cpu_package_power_w", "hwi_cpu_package_power"),
+    "cpu_ppt_w": ("hwi_cpu_ppt_w", "hwi_cpu_ppt"),
+    "cpu_core_power_w": ("hwi_cpu_core_power_w", "hwi_cpu_core_power"),
+    "cpu_soc_power_w": ("hwi_cpu_soc_power_w", "hwi_cpu_soc_power"),
+}
+
+
+class _ObservabilityLogSampler:
+    def __init__(self, log: Log, *, interval_s: int = 15):
+        self._log = log
+        self._interval_s = max(5, int(interval_s))
+        self._endpoints = self._build_endpoints()
+        self._stop_event = threading.Event()
+        self._thread = None
+        self._samples = {key: [] for key in OBSERVABILITY_METRIC_ALIASES}
+        self._source = "unavailable"
+
+    def start(self) -> None:
+        self._thread = threading.Thread(target=self._run, name="observability-log-sampler", daemon=True)
+        self._thread.start()
+
+    def stop(self) -> None:
+        self._stop_event.set()
+        if self._thread is not None:
+            self._thread.join(timeout=self._interval_s + 2)
+        self._log_summary()
+
+    def _run(self) -> None:
+        while not self._stop_event.is_set():
+            snapshot = self._collect_snapshot()
+            if snapshot:
+                self._record_snapshot(snapshot)
+            self._stop_event.wait(self._interval_s)
+
+    def _build_endpoints(self):
+        endpoints = []
+
+        gateway = self._detect_default_gateway()
+        if gateway:
+            endpoints.extend(
+                [
+                    f"http://{gateway}:9091/metrics/job/hwinfo/instance/windows-host",
+                    f"http://{gateway}:9091/metrics",
+                ]
+            )
+
+        endpoints.extend(
+            [
+                "http://host.docker.internal:9091/metrics/job/hwinfo/instance/windows-host",
+                "http://host.docker.internal:9091/metrics",
+                "http://pushgateway:9091/metrics/job/hwinfo/instance/windows-host",
+                "http://pushgateway:9091/metrics",
+                "http://prometheus:9090/federate?match[]={__name__=~\"hwi_cpu_(package_power|ppt|core_power|soc_power)(_w)?\"}",
+                "http://127.0.0.1:10445/metrics",
+                "http://127.0.0.1:9091/metrics/job/hwinfo/instance/windows-host",
+                "http://127.0.0.1:9091/metrics",
+            ]
+        )
+
+        deduped = []
+        seen = set()
+        for endpoint in endpoints:
+            if endpoint in seen:
+                continue
+            seen.add(endpoint)
+            deduped.append(endpoint)
+        return tuple(deduped)
+
+    def _detect_default_gateway(self):
+        route_path = "/proc/net/route"
+        try:
+            with open(route_path, "r", encoding="utf-8") as handle:
+                next(handle, None)
+                for line in handle:
+                    fields = line.strip().split()
+                    if len(fields) < 3:
+                        continue
+                    destination = fields[1]
+                    gateway = fields[2]
+                    if destination != "00000000" or gateway == "00000000":
+                        continue
+                    octets = [str(int(gateway[index:index + 2], 16)) for index in range(0, 8, 2)]
+                    octets.reverse()
+                    return ".".join(octets)
+        except Exception:
+            return None
+        return None
+
+    def _collect_snapshot(self):
+        for endpoint in self._endpoints:
+            try:
+                with urllib_request.urlopen(endpoint, timeout=3) as response:
+                    payload = response.read().decode("utf-8", errors="ignore")
+            except (urllib_error.URLError, TimeoutError, OSError, ValueError):
+                continue
+
+            parsed = self._parse_metrics(payload)
+            if parsed:
+                self._source = endpoint
+                return parsed
+
+        return None
+
+    def _parse_metrics(self, payload: str):
+        metric_values = {}
+        for line in payload.splitlines():
+            stripped = line.strip()
+            if not stripped or stripped.startswith("#"):
+                continue
+            try:
+                metric_name, raw_value = stripped.rsplit(None, 1)
+            except ValueError:
+                continue
+            metric_name = metric_name.split("{", 1)[0]
+            try:
+                metric_value = float(raw_value)
+            except ValueError:
+                continue
+            metric_values.setdefault(metric_name, metric_value)
+
+        snapshot = {}
+        for output_key, aliases in OBSERVABILITY_METRIC_ALIASES.items():
+            for alias in aliases:
+                if alias in metric_values:
+                    snapshot[output_key] = metric_values[alias]
+                    break
+        return snapshot
+
+    def _record_snapshot(self, snapshot) -> None:
+        parts = [f"source={self._source}"]
+        for metric_name, metric_value in snapshot.items():
+            self._samples[metric_name].append(metric_value)
+            parts.append(f"{metric_name}={metric_value:.6f}")
+        self._log.info("observability_snapshot " + " ".join(parts))
+
+    def _log_summary(self) -> None:
+        summary_parts = [f"source={self._source}", f"interval_s={self._interval_s}"]
+        sample_count = 0
+        for metric_name, values in self._samples.items():
+            if not values:
+                continue
+            sample_count = max(sample_count, len(values))
+            summary_parts.extend(
+                [
+                    f"{metric_name}_avg={sum(values) / len(values):.6f}",
+                    f"{metric_name}_min={min(values):.6f}",
+                    f"{metric_name}_max={max(values):.6f}",
+                ]
+            )
+
+        if sample_count == 0:
+            self._log.info(f"observability_summary source=unavailable interval_s={self._interval_s} samples=0")
+            return
+
+        summary_parts.append(f"samples={sample_count}")
+        self._log.info("observability_summary " + " ".join(summary_parts))
 
 
 def init_training_device(requested_device, process_id, num_workers, gpu_num_per_machine, model_name=None):
@@ -257,6 +420,7 @@ def main():
     worker_number = None
     run_success = False
     run_error_message = None
+    observability_sampler = None
 
     # 2. Initialize MPI communication
     comm, process_id, worker_number = SplitNN_init(args)
@@ -597,6 +761,9 @@ def main():
     # 7. Initialize logging
     log = Log("main", args)
     log.info(f"Process {process_id} initialized with device: {device}")
+    if process_id == 0:
+        observability_sampler = _ObservabilityLogSampler(log)
+        observability_sampler.start()
     
     try:
         # 8. Run the split learning experiment
@@ -606,6 +773,11 @@ def main():
         run_error_message = str(exc)
         raise
     finally:
+        if observability_sampler is not None:
+            try:
+                observability_sampler.stop()
+            except Exception as exc:
+                logging.warning("Observability log sampler failed to stop cleanly: %s", exc)
         if comm is not None:
             try:
                 comm.Barrier()

@@ -1,0 +1,17 @@
+execution_duration_ms: 694
+request_preview: '{"query": "Review this JavaScript async function for API calls.",
+  "template_variables": {"language": "javascript", "code": "async function fetchUserData(userId)
+  {\n  const apiKey = ''sk-1234567890'';\n  const user = await fetch(`/api/users/${userId}`);\n  const
+  posts = await fetch(`/api/users/${userId}/posts`);\n  return { user: user.json(),
+  posts: posts.json() };\n}", "query": "Review this JavaScript async function for
+  API calls.", "focus_areas": "security, performance, readability", "severity_levels":
+  "critical, warning, suggestion"}}'
+request_time: '2026-05-30T05:34:21.049Z'
+response_preview: '{"response": "There are some issues with error handling in the
+  async code."}'
+state: OK
+trace_id: tr-022004da1e367bd48fe3d66c10250037
+trace_location:
+  mlflow_experiment:
+    experiment_id: '896578296305049802'
+  type: MLFLOW_EXPERIMENT

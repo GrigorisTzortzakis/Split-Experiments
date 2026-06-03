@@ -15,6 +15,7 @@ import subprocess
 import sys
 import threading
 import ast
+import ctypes
 import importlib.util
 import json
 import math
@@ -31,13 +32,16 @@ from tkinter import ttk
 SETUP_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = SETUP_DIR.parent
 DOCKER_DIR = PROJECT_ROOT / "runtime" / "docker"
-KUBERNETES_DIR = PROJECT_ROOT / "runtime" / "kubernetes"
+OBSERVABILITY_DIR = PROJECT_ROOT / "runtime" / "observability"
 DOCKER_IMAGE = "split-framework-runner:latest"
-KUBERNETES_MULTI_POD_LAUNCHER = KUBERNETES_DIR / "launch_kubernetes.py"
-KUBERNETES_START_SCRIPT = KUBERNETES_DIR / "start_observability.ps1"
+DOCKER_MULTI_CONTAINER_LAUNCHER = DOCKER_DIR / "launch_multi_container.py"
+OBSERVABILITY_START_SCRIPT = OBSERVABILITY_DIR / "start_observability.ps1"
+OBSERVABILITY_ELEVATED_START_SCRIPT = OBSERVABILITY_DIR / "start_observability_elevated.ps1"
+OBSERVABILITY_RESTART_SCRIPT = OBSERVABILITY_DIR / "restart_observability_elevated.ps1"
 OBSERVABILITY_UI_PORT = 4000
 MLFLOW_UI_PORT = 5000
-OBSERVABILITY_DASHBOARD_URL = f"http://127.0.0.1:{OBSERVABILITY_UI_PORT}/d/split-framework-live/split-framework-live-containers"
+OBSERVABILITY_DASHBOARD_URL = f"http://127.0.0.1:{OBSERVABILITY_UI_PORT}/d/split-framework-observability-live/split-framework-observability-live"
+WSL_DISTRO_PREFERENCES: Tuple[str, ...] = ("Ubuntu-24.04", "Ubuntu")
 DOCKER_SERVER_CPUS = 5.0
 DOCKER_SERVER_MEMORY = 3.0 * 1024 ** 3
 DOCKER_SERVER_SWAP = 3500 * 1024 ** 2
@@ -88,7 +92,7 @@ MODEL_OPTIONS: List[Tuple[str, str]] = [
 ]
 DATASET_OPTIONS: List[str] = ["cifar10", "cifar100", "ag_news"]
 DEVICE_OPTIONS: List[Tuple[str, str]] = [("gpu", "gpu"), ("cpu", "cpu")]
-LAUNCH_BACKEND_OPTIONS: List[Tuple[str, str]] = [("Local MPI", "mpi"), ("Kubernetes", "kubernetes")]
+LAUNCH_BACKEND_OPTIONS: List[Tuple[str, str]] = [("Local MPI", "mpi"), ("Docker", "docker")]
 UI_DESTINATION_OPTIONS: List[Tuple[str, str]] = [("MLflow", "mlflow"), ("Grafana", "grafana")]
 SUPPORTED_DATASETS_BY_MODEL: Dict[str, Tuple[str, ...]] = {
     "resnet18": ("cifar10",),
@@ -257,38 +261,11 @@ def _find_docker() -> str:
     return "docker"
 
 
-def _find_kubectl() -> str:
-    candidates = ["kubectl.exe", "kubectl"]
-    for candidate in candidates:
-        resolved = shutil_which(candidate)
-        if resolved:
-            return resolved
-    windows_candidates = [
-        Path("C:/Program Files/Docker/Docker/resources/bin/kubectl.exe"),
-        Path.home() / "AppData" / "Local" / "Programs" / "Docker" / "Docker" / "resources" / "bin" / "kubectl.exe",
-    ]
-    for candidate in windows_candidates:
-        if candidate.exists():
-            return str(candidate)
-    return "kubectl"
-
-
 def _tool_exists(command: str) -> bool:
     candidate = Path(command)
     if candidate.is_absolute():
         return candidate.exists()
     return shutil_which(command) is not None
-
-
-def _run_json_command(command: Sequence[str]) -> Optional[object]:
-    try:
-        completed = subprocess.run(command, check=True, capture_output=True, text=True)
-    except Exception:
-        return None
-    try:
-        return json.loads(completed.stdout)
-    except Exception:
-        return None
 
 
 def shutil_which(name: str) -> Optional[str]:
@@ -306,6 +283,76 @@ def shutil_which(name: str) -> Optional[str]:
             candidate = Path(directory) / candidate_name
             if candidate.exists():
                 return str(candidate)
+    return None
+
+
+def _find_wsl_executable() -> Optional[str]:
+    windows_dir = Path(os.environ.get("SystemRoot", r"C:\Windows"))
+    candidates = [windows_dir / "System32" / "wsl.exe", Path("C:/Windows/System32/wsl.exe")]
+    for candidate in candidates:
+        if candidate.exists():
+            return str(candidate)
+    return shutil_which("wsl.exe") or shutil_which("wsl")
+
+
+def _windows_path_to_wsl(path: Path | str) -> str:
+    resolved = str(Path(path).resolve()).replace("\\", "/")
+    if len(resolved) >= 3 and resolved[1:3] == ":/":
+        return f"/mnt/{resolved[0].lower()}{resolved[2:]}"
+    return resolved
+
+
+def _list_wsl_distros() -> List[str]:
+    wsl_exe = _find_wsl_executable()
+    if not wsl_exe:
+        return []
+    try:
+        completed = subprocess.run(
+            [wsl_exe, "-l", "-q"],
+            capture_output=True,
+            text=True,
+            timeout=15,
+            check=False,
+        )
+    except Exception:
+        return []
+    if completed.returncode != 0:
+        return []
+    distros = []
+    for raw_line in completed.stdout.splitlines():
+        line = raw_line.replace("\x00", "").strip()
+        if line:
+            distros.append(line)
+    preferred = [name for name in WSL_DISTRO_PREFERENCES if name in distros]
+    remaining = [name for name in distros if name not in preferred]
+    return preferred + remaining
+
+
+def _find_wsl_docker_distro() -> Optional[str]:
+    wsl_exe = _find_wsl_executable()
+    if not wsl_exe:
+        return None
+    for distro in _list_wsl_distros():
+        try:
+            probe = subprocess.run(
+                [
+                    wsl_exe,
+                    "-d",
+                    distro,
+                    "--",
+                    "sh",
+                    "-lc",
+                    "command -v docker >/dev/null 2>&1 && command -v python3 >/dev/null 2>&1",
+                ],
+                capture_output=True,
+                text=True,
+                timeout=20,
+                check=False,
+            )
+        except Exception:
+            continue
+        if probe.returncode == 0:
+            return distro
     return None
 
 
@@ -332,6 +379,7 @@ class Job:
     name: str
     command: List[str]
     summary: str
+    backend: str
     status: str = "Waiting"
 
 
@@ -348,15 +396,18 @@ class ExperimentMenu:
         self.defaults = _load_defaults(self.config_path)
         self.saved_state = self._load_menu_state()
         self.mpiexec_path = _find_mpiexec()
+        self.wsl_exe = _find_wsl_executable()
+        self.docker_wsl_distro = _find_wsl_docker_distro()
         self.docker_path = _find_docker()
-        self.kubectl_path = _find_kubectl()
         self.python_path = _find_python_executable()
+        self._docker_image_checked = False
 
         self.jobs: List[Job] = []
         self.jobs_lock = threading.Lock()
         self.process: Optional[subprocess.Popen[str]] = None
         self.mlflow_process: Optional[subprocess.Popen[str]] = None
         self.observability_process: Optional[subprocess.Popen[str]] = None
+        self.observability_launch_pending = False
         self.runner_thread: Optional[threading.Thread] = None
         self.stop_requested = False
         self.running = False
@@ -745,7 +796,7 @@ class ExperimentMenu:
         return DEVICE_OPTIONS[0][0]
 
     def _default_launch_backend_label(self) -> str:
-        current = str(self.saved_state.get("launch_backend") or "mpi").strip().lower()
+        current = str(self.saved_state.get("launch_backend") or "docker").strip().lower()
         for label, value in LAUNCH_BACKEND_OPTIONS:
             if value == current:
                 return label
@@ -1499,17 +1550,59 @@ class ExperimentMenu:
             *experiment_args,
         ]
 
-    def _build_kubernetes_command(self) -> List[str]:
+    def _build_docker_command(self) -> List[str]:
         container_root = "/workspace/Split-Framework"
         experiment_args, _total_processes, _active_clients = self._build_experiment_args(
             f"{container_root}/setup/main.py",
             f"{container_root}/setup/config/config.yaml",
         )
+        if self._use_wsl_docker_backend():
+            return [
+                self.wsl_exe,
+                "-d",
+                self.docker_wsl_distro,
+                "--",
+                "python3",
+                _windows_path_to_wsl(DOCKER_MULTI_CONTAINER_LAUNCHER),
+                "--docker-path",
+                "docker",
+                "--image",
+                DOCKER_IMAGE,
+                "--project-root",
+                _windows_path_to_wsl(PROJECT_ROOT),
+                "--device",
+                self.device_map[self.device_var.get()],
+                "--clients",
+                str(int(self.clients_var.get())),
+                "--server-cpus",
+                "5",
+                "--server-memory",
+                "3g",
+                "--server-swap",
+                "3500m",
+                "--client-cpus",
+                "1.75",
+                "--client-memory",
+                "1200m",
+                "--client-swap",
+                "1500m",
+                "--fed-server-cpus",
+                "2",
+                "--fed-server-memory",
+                "1500m",
+                "--fed-server-swap",
+                "2g",
+                "--shm-size",
+                DOCKER_SHM_SIZE,
+                *( ["--with-fed-server"] if self._selected_algorithm_uses_fed_server() else [] ),
+                "--",
+                *experiment_args,
+            ]
         return [
             self.python_path,
-            str(KUBERNETES_MULTI_POD_LAUNCHER),
-            "--kubectl-path",
-            self.kubectl_path,
+            str(DOCKER_MULTI_CONTAINER_LAUNCHER),
+            "--docker-path",
+            self.docker_path,
             "--image",
             DOCKER_IMAGE,
             "--project-root",
@@ -1544,8 +1637,8 @@ class ExperimentMenu:
         ]
 
     def _build_command(self) -> List[str]:
-        if self._selected_launch_backend() == "kubernetes":
-            return self._build_kubernetes_command()
+        if self._selected_launch_backend() == "docker":
+            return self._build_docker_command()
         return self._build_mpi_command()
 
     def _build_summary(self) -> str:
@@ -1560,9 +1653,9 @@ class ExperimentMenu:
             self.partition_var.get(),
             f"{int(self.epochs_var.get())} epochs",
         ]
-        if self._selected_launch_backend() == "kubernetes":
+        if self._selected_launch_backend() == "docker":
             summary.append(
-                f"k8s-limit {self._docker_total_cpu_limit():.2f}cpu/{self._docker_container_memory_limit()}"
+                f"docker-limit {self._docker_total_cpu_limit():.2f}cpu/{self._docker_container_memory_limit()}"
             )
         reduction_mode, _selected_method = self._resolve_mode_selection()
         if reduction_mode != "none":
@@ -1611,7 +1704,7 @@ class ExperimentMenu:
         if self.device_var.get() not in self.device_map:
             errors.append("Device must be cpu or gpu.")
         if self.launch_backend_var.get() not in self.launch_backend_map:
-            errors.append("Launch backend must be Local MPI or Kubernetes.")
+            errors.append("Launch backend must be Local MPI or Docker.")
 
         selected_model = self.model_var.get()
         selected_dataset = self.dataset_var.get()
@@ -1667,20 +1760,12 @@ class ExperimentMenu:
             errors.append(f"Missing runner: {self.main_path}")
         if not self.config_path.exists():
             errors.append(f"Missing config: {self.config_path}")
-        if self._selected_launch_backend() == "kubernetes" and not _tool_exists(self.kubectl_path):
-            errors.append("Kubernetes backend requires kubectl. Enable Docker Desktop Kubernetes or add kubectl to PATH.")
-        if self._selected_launch_backend() == "kubernetes" and not (DOCKER_DIR / "Dockerfile").exists():
-            errors.append(f"Kubernetes backend requires {DOCKER_DIR / 'Dockerfile'}.")
-        if self._selected_launch_backend() == "kubernetes" and not KUBERNETES_MULTI_POD_LAUNCHER.exists():
-            errors.append(f"Kubernetes backend requires {KUBERNETES_MULTI_POD_LAUNCHER}.")
-        if self._selected_launch_backend() == "kubernetes":
-            current_context = self._kubectl_current_context()
-            if current_context.startswith("k3d-") and not _tool_exists(self.docker_path):
-                errors.append("Kubernetes backend on k3d requires docker.exe so the runner image can be imported into the k3d node containers.")
-            if self.device_map.get(self.device_var.get()) == "gpu":
-                total_gpus = self._kubernetes_allocatable_gpus()
-                if total_gpus == 0:
-                    errors.append("Kubernetes backend requested GPU, but the active cluster exposes no allocatable nvidia.com/gpu resources.")
+        if self._selected_launch_backend() == "docker" and not self._docker_backend_available():
+            errors.append("Docker backend requires a Windows docker.exe or a WSL distro with docker and python3 installed.")
+        if self._selected_launch_backend() == "docker" and not (DOCKER_DIR / "Dockerfile").exists():
+            errors.append(f"Docker backend requires {DOCKER_DIR / 'Dockerfile'}.")
+        if self._selected_launch_backend() == "docker" and not DOCKER_MULTI_CONTAINER_LAUNCHER.exists():
+            errors.append(f"Docker backend requires {DOCKER_MULTI_CONTAINER_LAUNCHER}.")
         if self._selected_launch_backend() == "mpi" and not _tool_exists(self.mpiexec_path):
             errors.append("Local MPI backend requires mpiexec on PATH.")
 
@@ -1704,12 +1789,99 @@ class ExperimentMenu:
 
         command = self._build_command()
         summary = self._build_summary()
+        backend = self._selected_launch_backend()
         with self.jobs_lock:
-            job = Job(name=f"Run {len(self.jobs) + 1}", command=command, summary=summary)
+            job = Job(name=f"Run {len(self.jobs) + 1}", command=command, summary=summary, backend=backend)
             self.jobs.append(job)
             queued_count = len(self.jobs)
         self._refresh_queue_list()
         self.status_var.set(f"Queued {queued_count} run(s)")
+
+    def _docker_build_command(self) -> List[str]:
+        dockerfile_path = DOCKER_DIR / "Dockerfile"
+        if self._use_wsl_docker_backend():
+            return [
+                self.wsl_exe,
+                "-d",
+                self.docker_wsl_distro,
+                "--",
+                "docker",
+                "build",
+                "-t",
+                DOCKER_IMAGE,
+                "-f",
+                _windows_path_to_wsl(dockerfile_path),
+                _windows_path_to_wsl(PROJECT_ROOT),
+            ]
+        return [
+            self.docker_path,
+            "build",
+            "-t",
+            DOCKER_IMAGE,
+            "-f",
+            str(dockerfile_path),
+            str(PROJECT_ROOT),
+        ]
+
+    def _docker_image_exists(self) -> bool:
+        if not self._docker_backend_available():
+            return False
+        try:
+            inspected = subprocess.run(
+                self._docker_cli_command("image", "inspect", DOCKER_IMAGE),
+                check=False,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        except Exception:
+            return False
+        return inspected.returncode == 0
+
+    def _ensure_docker_image(self) -> bool:
+        if self._docker_image_checked:
+            return True
+        if self._docker_image_exists():
+            self._docker_image_checked = True
+            return True
+
+        build_command = self._docker_build_command()
+        self.ui_queue.put(("status", f"Building Docker image {DOCKER_IMAGE}..."))
+        self.ui_queue.put(("log", f"\n$ {self._quoted_command(build_command)}\n"))
+        creation_flags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) if os.name == "nt" else 0
+        try:
+            build_process = subprocess.Popen(
+                build_command,
+                cwd=str(PROJECT_ROOT),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                bufsize=1,
+                creationflags=creation_flags,
+            )
+        except Exception as exc:
+            self.ui_queue.put(("log", f"Failed to start Docker image build: {exc}\n"))
+            self.ui_queue.put(("status", "Docker image build failed"))
+            return False
+
+        try:
+            assert build_process.stdout is not None
+            for line in build_process.stdout:
+                self.ui_queue.put(("log", line))
+        finally:
+            if build_process.stdout is not None:
+                build_process.stdout.close()
+
+        return_code = build_process.wait()
+        if return_code != 0:
+            self.ui_queue.put(("log", f"Docker image build failed with exit code {return_code}.\n"))
+            self.ui_queue.put(("status", "Docker image build failed"))
+            return False
+
+        self._docker_image_checked = True
+        self.ui_queue.put(("status", f"Built Docker image {DOCKER_IMAGE}"))
+        return True
 
     def _run_now(self) -> None:
         if self.running:
@@ -1742,47 +1914,48 @@ class ExperimentMenu:
             sock.settimeout(0.3)
             return sock.connect_ex((host, port)) == 0
 
-    def _kubectl_current_context(self) -> str:
-        try:
-            completed = subprocess.run(
-                [self.kubectl_path, "config", "current-context"],
-                check=True,
-                capture_output=True,
-                text=True,
-            )
-        except Exception:
-            return ""
-        return completed.stdout.strip()
+    def _launch_observability_elevated(self, script_path: Path) -> None:
+        command = [
+            "powershell",
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            str(script_path),
+        ]
+        quoted_command = self._quoted_command(command)
 
-    def _kubernetes_allocatable_gpus(self) -> Optional[int]:
-        data = _run_json_command([self.kubectl_path, "get", "nodes", "-o", "json"])
-        if not isinstance(data, dict):
-            return None
-        total = 0
-        for item in data.get("items", []):
-            allocatable = item.get("status", {}).get("allocatable", {})
-            try:
-                total += int(str(allocatable.get("nvidia.com/gpu", "0")))
-            except (TypeError, ValueError):
-                continue
-        return total
+        if os.name != "nt":
+            creation_flags = getattr(subprocess, "CREATE_NEW_CONSOLE", 0)
+            self.observability_process = subprocess.Popen(
+                command,
+                cwd=str(PROJECT_ROOT),
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                creationflags=creation_flags,
+            )
+            self.output_box.insert("end", f"Starting observability stack with: {quoted_command}\n")
+            return
+
+        shell32 = getattr(ctypes, "windll", None)
+        if shell32 is None or not hasattr(shell32, "shell32"):
+            raise RuntimeError("Windows ShellExecute API is unavailable.")
+
+        parameters = f'-NoProfile -ExecutionPolicy Bypass -File "{script_path}"'
+        result = shell32.shell32.ShellExecuteW(None, "runas", "powershell.exe", parameters, str(PROJECT_ROOT), 1)
+        if result <= 32:
+            if result == 5:
+                raise PermissionError("The elevation request was denied.")
+            raise RuntimeError(f"ShellExecuteW failed with code {result}.")
+
+        self.output_box.insert("end", f"Starting observability stack with elevation: {quoted_command}\n")
 
     def _start_mlflow_server(self, open_target: str = "grafana") -> None:
-        if open_target == "grafana" and self._is_port_open("127.0.0.1", OBSERVABILITY_UI_PORT):
-            self.status_var.set("Observability UI already running")
-            self.output_box.insert("end", f"Observability UI already running at {self._mlflow_ui_url()}\n")
-            self.output_box.see("end")
-            webbrowser.open(self._mlflow_ui_url())
-            return
         if open_target == "mlflow" and self._is_port_open("127.0.0.1", MLFLOW_UI_PORT):
             self.status_var.set("MLflow UI already running")
             self.output_box.insert("end", f"MLflow UI already running at {self._local_mlflow_ui_url()}\n")
             self.output_box.see("end")
             webbrowser.open(self._local_mlflow_ui_url())
-            return
-
-        if not KUBERNETES_START_SCRIPT.exists():
-            messagebox.showerror("Observability Missing", f"Could not find {KUBERNETES_START_SCRIPT}")
             return
 
         if not self._is_port_open("127.0.0.1", MLFLOW_UI_PORT):
@@ -1818,45 +1991,49 @@ class ExperimentMenu:
 
         if open_target == "mlflow":
             self.status_var.set("Starting MLflow UI...")
-            self.root.after(1500, lambda: self._finalize_mlflow_launch(open_target))
+            self.root.after(1500, lambda: self._finalize_mlflow_launch(open_target, attempts_remaining=10))
             return
 
-        if self.observability_process is not None and self.observability_process.poll() is None:
+        observability_script = OBSERVABILITY_ELEVATED_START_SCRIPT
+        if not observability_script.exists():
+            messagebox.showerror("Observability Missing", f"Could not find {observability_script}")
+            return
+
+        if self.observability_launch_pending:
             self.status_var.set("Observability UI starting...")
-            self.root.after(3000, lambda: self._finalize_mlflow_launch(open_target))
+            self.root.after(3000, lambda: self._finalize_mlflow_launch(open_target, attempts_remaining=15))
             return
 
-        command = [
-            "powershell",
-            "-ExecutionPolicy",
-            "Bypass",
-            "-File",
-            str(KUBERNETES_START_SCRIPT),
-            "-ProjectRoot",
-            str(PROJECT_ROOT),
-        ]
-        creation_flags = getattr(subprocess, "CREATE_NEW_CONSOLE", 0)
+        if self._is_port_open("127.0.0.1", OBSERVABILITY_UI_PORT):
+            self.observability_launch_pending = False
+            self.status_var.set("Observability UI running")
+            self.output_box.insert("end", f"Observability UI already running at {self._mlflow_ui_url()}\n")
+            self.output_box.insert("end", f"MLflow UI remains available at {self._local_mlflow_ui_url()}\n")
+            self.output_box.see("end")
+            webbrowser.open(self._mlflow_ui_url())
+            return
+
         try:
-            self.observability_process = subprocess.Popen(
-                command,
-                cwd=str(PROJECT_ROOT),
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                creationflags=creation_flags,
-            )
+            self.observability_launch_pending = True
+            self._launch_observability_elevated(observability_script)
         except FileNotFoundError:
-            messagebox.showerror("Observability Missing", "Could not start PowerShell for the Kubernetes observability stack.")
+            self.observability_launch_pending = False
+            messagebox.showerror("Observability Missing", "Could not start PowerShell for the Docker observability stack.")
+            return
+        except PermissionError as exc:
+            self.observability_launch_pending = False
+            messagebox.showerror("Observability Cancelled", str(exc))
             return
         except Exception as exc:
+            self.observability_launch_pending = False
             messagebox.showerror("Observability Failed", f"Failed to start the observability stack: {exc}")
             return
 
         self.status_var.set("Starting observability UI...")
-        self.output_box.insert("end", f"Starting observability stack with: {self._quoted_command(command)}\n")
         self.output_box.see("end")
-        self.root.after(5000, lambda: self._finalize_mlflow_launch(open_target))
+        self.root.after(5000, lambda: self._finalize_mlflow_launch(open_target, attempts_remaining=15))
 
-    def _finalize_mlflow_launch(self, open_target: str = "grafana") -> None:
+    def _finalize_mlflow_launch(self, open_target: str = "grafana", attempts_remaining: int = 1) -> None:
         if open_target == "mlflow":
             if self._is_port_open("127.0.0.1", MLFLOW_UI_PORT):
                 self.status_var.set("MLflow UI running")
@@ -1864,12 +2041,17 @@ class ExperimentMenu:
                 self.output_box.see("end")
                 webbrowser.open(self._local_mlflow_ui_url())
                 return
+            if attempts_remaining > 1:
+                self.status_var.set("Starting MLflow UI...")
+                self.root.after(1500, lambda: self._finalize_mlflow_launch(open_target, attempts_remaining - 1))
+                return
             self.status_var.set("MLflow UI failed to start")
             self.output_box.insert("end", "MLflow did not start on port 5000. Check the spawned console for details.\n")
             self.output_box.see("end")
             return
 
         if self._is_port_open("127.0.0.1", OBSERVABILITY_UI_PORT):
+            self.observability_launch_pending = False
             self.status_var.set("Observability UI running")
             self.output_box.insert("end", f"Observability UI running at {self._mlflow_ui_url()}\n")
             self.output_box.insert("end", f"MLflow UI remains available at {self._local_mlflow_ui_url()}\n")
@@ -1877,8 +2059,14 @@ class ExperimentMenu:
             webbrowser.open(self._mlflow_ui_url())
             return
 
+        if attempts_remaining > 1:
+            self.status_var.set("Starting observability UI...")
+            self.root.after(2000, lambda: self._finalize_mlflow_launch(open_target, attempts_remaining - 1))
+            return
+
+        self.observability_launch_pending = False
         self.status_var.set("Observability UI failed to start")
-        self.output_box.insert("end", "Grafana did not start on port 4000. Check the spawned PowerShell console for details.\n")
+        self.output_box.insert("end", "Grafana did not start on port 4000. Check the elevated PowerShell window for HWiNFO or Docker startup errors.\n")
         self.output_box.see("end")
 
     def _remove_selected(self) -> None:
@@ -1931,11 +2119,18 @@ class ExperimentMenu:
                 job = next((candidate for candidate in self.jobs if candidate.status == "Waiting"), None)
                 if job is None:
                     break
+            if job.backend == "docker" and not self._ensure_docker_image():
+                with self.jobs_lock:
+                    job.status = "Failed"
+                self.ui_queue.put(("refresh_queue", ""))
+                break
+            with self.jobs_lock:
                 job.status = "Started"
             self.ui_queue.put(("refresh_queue", ""))
             self.ui_queue.put(("status", f"Running: {job.summary}"))
             self.ui_queue.put(("log", f"\n$ {self._quoted_command(job.command)}\n"))
             try:
+                creation_flags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) if os.name == "nt" else 0
                 self.process = subprocess.Popen(
                     job.command,
                     cwd=str(PROJECT_ROOT),
@@ -1943,6 +2138,7 @@ class ExperimentMenu:
                     stderr=subprocess.STDOUT,
                     text=True,
                     bufsize=1,
+                    creationflags=creation_flags,
                 )
             except FileNotFoundError:
                 missing_tool = Path(job.command[0]).name if job.command else "launcher"
@@ -1984,24 +2180,115 @@ class ExperimentMenu:
         final_status = "Queue stopped" if self.stop_requested else ("Queue finished" if not remaining_jobs else self.status_var.get())
         self.ui_queue.put(("status", final_status))
 
+    def _cleanup_managed_docker_resources(self) -> None:
+        if not self._docker_backend_available():
+            return
+
+        try:
+            listed = subprocess.run(
+                self._docker_cli_command(
+                    "ps",
+                    "-a",
+                    "--filter",
+                    "label=split-framework.launcher=multi-container",
+                    "--format",
+                    "{{.Names}}",
+                ),
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+        except Exception:
+            listed = None
+
+        container_names: List[str] = []
+        if listed is not None and listed.returncode == 0:
+            container_names = [line.strip() for line in listed.stdout.splitlines() if line.strip()]
+
+        if container_names:
+            try:
+                subprocess.run(
+                    self._docker_cli_command("rm", "-f", *container_names),
+                    check=False,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+            except Exception:
+                pass
+
+        try:
+            subprocess.run(
+                self._docker_cli_command("network", "rm", "split-framework-net"),
+                check=False,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        except Exception:
+            pass
+
+    def _use_wsl_docker_backend(self) -> bool:
+        return bool(self.docker_wsl_distro and self.wsl_exe and not _tool_exists(self.docker_path))
+
+    def _docker_backend_available(self) -> bool:
+        return _tool_exists(self.docker_path) or self._use_wsl_docker_backend()
+
+    def _docker_cli_command(self, *parts: str) -> List[str]:
+        if self._use_wsl_docker_backend():
+            return [self.wsl_exe, "-d", self.docker_wsl_distro, "--", "docker", *parts]
+        return [self.docker_path, *parts]
+
     def _stop_current_run(self) -> None:
         self.stop_requested = True
         if self.process is None:
+            self._cleanup_managed_docker_resources()
             self.status_var.set("Stop requested")
+            return
+        graceful_stop = False
+        if os.name == "nt" and hasattr(signal, "CTRL_BREAK_EVENT"):
+            try:
+                self.process.send_signal(signal.CTRL_BREAK_EVENT)
+                self.process.wait(timeout=8)
+                graceful_stop = True
+            except Exception:
+                graceful_stop = False
+        if not graceful_stop:
+            try:
+                self.process.terminate()
+                self.process.wait(timeout=5)
+                graceful_stop = True
+            except Exception:
+                graceful_stop = False
+        if not graceful_stop:
+            try:
+                subprocess.run(
+                    ["taskkill", "/PID", str(self.process.pid), "/T", "/F"],
+                    check=False,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+            except Exception:
+                try:
+                    self.process.terminate()
+                except Exception:
+                    pass
+        self._cleanup_managed_docker_resources()
+        self.status_var.set("Stopping current run...")
+
+    def _kill_process_tree(self, process: Optional[subprocess.Popen[str]]) -> None:
+        if process is None or process.poll() is not None:
             return
         try:
             subprocess.run(
-                ["taskkill", "/PID", str(self.process.pid), "/T", "/F"],
+                ["taskkill", "/PID", str(process.pid), "/T", "/F"],
                 check=False,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
             )
         except Exception:
             try:
-                self.process.terminate()
+                process.kill()
             except Exception:
                 pass
-        self.status_var.set("Stopping current run...")
 
     def _drain_ui_queue(self) -> None:
         while True:
@@ -2021,30 +2308,20 @@ class ExperimentMenu:
         self.root.after(150, self._drain_ui_queue)
 
     def _on_close(self) -> None:
-        if self.running and not messagebox.askyesno("Exit Launcher", "A run is still active. Stop it and close the launcher?"):
-            return
         self._save_menu_state()
-        self._stop_current_run()
-        if self.mlflow_process is not None and self.mlflow_process.poll() is None:
-            try:
-                subprocess.run(
-                    ["taskkill", "/PID", str(self.mlflow_process.pid), "/T", "/F"],
-                    check=False,
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                )
-            except Exception:
-                pass
-        if self.observability_process is not None and self.observability_process.poll() is None:
-            try:
-                subprocess.run(
-                    ["taskkill", "/PID", str(self.observability_process.pid), "/T", "/F"],
-                    check=False,
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                )
-            except Exception:
-                pass
+        self.stop_requested = True
+        self.running = False
+        self._kill_process_tree(self.process)
+        self._cleanup_managed_docker_resources()
+        self._kill_process_tree(self.mlflow_process)
+        self._kill_process_tree(self.observability_process)
+        self.process = None
+        self.mlflow_process = None
+        self.observability_process = None
+        try:
+            self.root.quit()
+        except Exception:
+            pass
         self.root.destroy()
 
 

@@ -1,0 +1,16 @@
+execution_duration_ms: 1321
+request_preview: '{"message": "I have a model logged in MLflow. How do I deploy it
+  as an API?", "turn": 1}'
+request_time: '2026-06-03T08:30:11.094Z'
+response_preview: '{"response": "Great! Here''s the deployment path:\n\n1. **Register
+  the model** (if not already):\n```python\nmlflow.register_model(\n    ''runs:/<run_id>/model'',\n    ''my-classifier''\n)\n```\n\n2.
+  **Serve it locally**:\n```bash\nmlflow models serve -m models:/my-classifier/1 -p
+  5001\n```\n\n3. **Test the endpoint**:\n```bash\ncurl -X POST http://localhost:5001/invocations
+  \\\n  -H ''Content-Type: application/json'' \\\n  -d ''{\"inputs\": [[1, 2, 3, 4]]}''\n```\n\nWant
+  to deploy to Kubernetes or a cloud platform instead?"}'
+state: OK
+trace_id: tr-9036e14f565db7e3cbbc602a0366e8f2
+trace_location:
+  mlflow_experiment:
+    experiment_id: '896578296305049802'
+  type: MLFLOW_EXPERIMENT

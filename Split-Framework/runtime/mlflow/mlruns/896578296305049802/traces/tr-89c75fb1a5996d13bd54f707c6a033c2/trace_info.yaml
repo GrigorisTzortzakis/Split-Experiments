@@ -1,0 +1,13 @@
+execution_duration_ms: 1265
+request_preview: '{"query": "What is MLflow Tracing and how does it help with LLM
+  observability?"}'
+request_time: '2026-05-27T22:17:04.175Z'
+response_preview: '{"response": "MLflow Tracing is a feature that helps you understand
+  what''s happening in your LLM applications. It captures information about your app''s
+  execution and shows it in the UI somewhere."}'
+state: OK
+trace_id: tr-89c75fb1a5996d13bd54f707c6a033c2
+trace_location:
+  mlflow_experiment:
+    experiment_id: '896578296305049802'
+  type: MLFLOW_EXPERIMENT

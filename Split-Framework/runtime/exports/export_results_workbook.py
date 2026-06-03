@@ -18,6 +18,11 @@ TENSOR_DISTRIBUTION_RE = re.compile(
     r"tensor_distribution\s+(?P<body>.+)$"
 )
 
+OBSERVABILITY_SUMMARY_RE = re.compile(
+    r"^(?P<timestamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2},\d{3}).*?"
+    r"observability_summary\s+(?P<body>.+)$"
+)
+
 COMM_BREAKDOWN_RE = re.compile(
     r"^(?P<timestamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2},\d{3}).*?"
     r"rank=(?P<rank>\d+)\s+node_type=(?P<node_type>\w+)\s+"
@@ -201,6 +206,30 @@ def parse_tensor_distribution_line(line: str) -> Optional[Dict[str, object]]:
     return parsed
 
 
+def parse_observability_summary_line(line: str) -> Optional[Dict[str, object]]:
+    match = OBSERVABILITY_SUMMARY_RE.match(line.strip())
+    if not match:
+        return None
+
+    parsed: Dict[str, object] = {"timestamp": match.group("timestamp")}
+    for kv_match in KEY_VALUE_RE.finditer(match.group("body")):
+        key = kv_match.group("key")
+        value = kv_match.group(2)
+        parsed[key] = value if key == "source" else _to_number(value)
+
+    return parsed
+
+
+def parse_latest_observability_summary(log_path: Path) -> Optional[Dict[str, object]]:
+    latest: Optional[Dict[str, object]] = None
+    with log_path.open("r", encoding="utf-8", errors="ignore") as handle:
+        for raw_line in handle:
+            parsed = parse_observability_summary_line(raw_line)
+            if parsed:
+                latest = parsed
+    return latest
+
+
 def safe_rel_path(path: Path, base_dir: Path) -> str:
     try:
         return path.relative_to(base_dir).as_posix()
@@ -319,6 +348,7 @@ def build_run_summary_from_epochs(
     epochs: List[Dict[str, object]],
     is_fallback: bool,
     fallback_comm_totals: Optional[Dict[str, object]] = None,
+    observability_summary: Optional[Dict[str, object]] = None,
 ) -> Dict[str, object]:
     epochs.sort(key=lambda row: int(row["epoch"]))
     best_epoch = max(
@@ -422,7 +452,7 @@ def build_run_summary_from_epochs(
             ]
         )
 
-    return {
+    summary = {
         "run_id": rel_path,
         "log_path": rel_path,
         "method_family": method_family,
@@ -465,6 +495,30 @@ def build_run_summary_from_epochs(
         "total_quantized_run_mb": total_quantized_megabytes,
     }
 
+    if observability_summary:
+        summary.update(
+            {
+                "observability_source": observability_summary.get("source"),
+                "observability_interval_s": observability_summary.get("interval_s"),
+                "observability_samples": observability_summary.get("samples"),
+                "cpu_package_power_w_avg": observability_summary.get("cpu_package_power_w_avg"),
+                "cpu_package_power_w_min": observability_summary.get("cpu_package_power_w_min"),
+                "cpu_package_power_w_max": observability_summary.get("cpu_package_power_w_max"),
+                "cpu_ppt_w_avg": observability_summary.get("cpu_ppt_w_avg"),
+                "cpu_ppt_w_min": observability_summary.get("cpu_ppt_w_min"),
+                "cpu_ppt_w_max": observability_summary.get("cpu_ppt_w_max"),
+                "cpu_core_power_w_avg": observability_summary.get("cpu_core_power_w_avg"),
+                "cpu_core_power_w_min": observability_summary.get("cpu_core_power_w_min"),
+                "cpu_core_power_w_max": observability_summary.get("cpu_core_power_w_max"),
+                "cpu_soc_power_w_avg": observability_summary.get("cpu_soc_power_w_avg"),
+                "cpu_soc_power_w_min": observability_summary.get("cpu_soc_power_w_min"),
+                "cpu_soc_power_w_max": observability_summary.get("cpu_soc_power_w_max"),
+                "observability_last_timestamp": observability_summary.get("timestamp"),
+            }
+        )
+
+    return summary
+
 
 def parse_latest_comm_breakdown_totals(log_path: Path) -> Optional[Dict[str, object]]:
     latest: Optional[Dict[str, object]] = None
@@ -495,6 +549,7 @@ def load_runs(
         rel_path = safe_rel_path(log_path, logs_dir)
         method_family, method_variant, experiment_label = parse_log_path_metadata(rel_path)
         fallback_comm_totals = parse_latest_comm_breakdown_totals(log_path)
+        observability_summary = parse_latest_observability_summary(log_path)
 
         epochs: List[Dict[str, object]] = []
         with log_path.open("r", encoding="utf-8", errors="ignore") as handle:
@@ -566,6 +621,7 @@ def load_runs(
                 epochs=epochs,
                 is_fallback=is_fallback,
                 fallback_comm_totals=fallback_comm_totals,
+                observability_summary=observability_summary,
             )
         )
 
@@ -915,9 +971,25 @@ def write_workbooks(
         "final_quantized_total_mb",
         "total_raw_run_mb",
         "total_quantized_run_mb",
+        "observability_source",
+        "observability_interval_s",
+        "observability_samples",
+        "cpu_package_power_w_avg",
+        "cpu_package_power_w_min",
+        "cpu_package_power_w_max",
+        "cpu_ppt_w_avg",
+        "cpu_ppt_w_min",
+        "cpu_ppt_w_max",
+        "cpu_core_power_w_avg",
+        "cpu_core_power_w_min",
+        "cpu_core_power_w_max",
+        "cpu_soc_power_w_avg",
+        "cpu_soc_power_w_min",
+        "cpu_soc_power_w_max",
         "run_timestamp",
         "first_log_timestamp",
         "last_log_timestamp",
+        "observability_last_timestamp",
         "log_path",
     ]
     epoch_columns = [
@@ -1088,7 +1160,23 @@ def write_single_workbook(
         "final_quantized_total_mb",
         "total_raw_run_mb",
         "total_quantized_run_mb",
+        "observability_source",
+        "observability_interval_s",
+        "observability_samples",
+        "cpu_package_power_w_avg",
+        "cpu_package_power_w_min",
+        "cpu_package_power_w_max",
+        "cpu_ppt_w_avg",
+        "cpu_ppt_w_min",
+        "cpu_ppt_w_max",
+        "cpu_core_power_w_avg",
+        "cpu_core_power_w_min",
+        "cpu_core_power_w_max",
+        "cpu_soc_power_w_avg",
+        "cpu_soc_power_w_min",
+        "cpu_soc_power_w_max",
         "run_timestamp",
+        "observability_last_timestamp",
         "log_path",
     ]
     epoch_columns = [

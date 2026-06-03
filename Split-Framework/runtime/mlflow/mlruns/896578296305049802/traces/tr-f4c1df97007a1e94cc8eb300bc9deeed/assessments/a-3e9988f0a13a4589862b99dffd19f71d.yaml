@@ -1,0 +1,14 @@
+assessment_id: a-3e9988f0a13a4589862b99dffd19f71d
+assessment_name: expected_response
+create_time: '2026-06-03T13:04:08.901Z'
+expectation:
+  value: 'SparseFormer: New transformer with 12% accuracy gain and 40% memory reduction.
+    Uses O(n log n) sparse attention and dynamic positional encoding.'
+last_update_time: '2026-06-03T13:04:08.901Z'
+metadata:
+  demo: 'true'
+source:
+  source_id: demo_annotator
+  source_type: HUMAN
+trace_id: tr-f4c1df97007a1e94cc8eb300bc9deeed
+valid: true

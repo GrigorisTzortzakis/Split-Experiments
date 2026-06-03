@@ -1,0 +1,14 @@
+assessment_id: a-062830d8cc444231ad3361a908e2868c
+assessment_name: expected_response
+create_time: '2026-06-03T13:04:08.924Z'
+expectation:
+  value: Install with `pip install mlflow`, run `mlflow server`, then use mlflow.start_run()
+    with log_param() and log_metric() to track experiments.
+last_update_time: '2026-06-03T13:04:08.924Z'
+metadata:
+  demo: 'true'
+source:
+  source_id: demo_annotator
+  source_type: HUMAN
+trace_id: tr-74e5c5f43f1a8c918766daaf4a473753
+valid: true

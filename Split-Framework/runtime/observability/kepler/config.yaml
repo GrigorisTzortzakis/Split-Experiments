@@ -1,0 +1,40 @@
+monitor:
+  interval: 5s
+  staleness: 1000ms
+  maxTerminated: 500
+  minTerminatedEnergyThreshold: 1
+
+host:
+  sysfs: /host/sys
+  procfs: /host/proc
+
+cpu:
+  meters: [rapl, hwmon, fake]
+
+exporter:
+  stdout:
+    enabled: false
+  prometheus:
+    enabled: true
+    debugCollectors:
+      - go
+      - process
+  metricsLevel:
+    - node
+    - process
+    - container
+
+web:
+  listenAddresses:
+    - :28282
+
+kube:
+  enabled: false
+
+experimental:
+  gpu:
+    enabled: true
+
+log:
+  level: info
+  format: text

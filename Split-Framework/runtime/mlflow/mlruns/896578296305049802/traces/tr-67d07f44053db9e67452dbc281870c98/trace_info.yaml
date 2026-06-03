@@ -1,0 +1,15 @@
+execution_duration_ms: 496
+request_preview: '{"message": "My RAG application is giving inconsistent answers.
+  How can I debug it?", "turn": 1}'
+request_time: '2026-06-03T03:00:46.361Z'
+response_preview: '{"response": "Let''s debug this systematically with MLflow Tracing!\n\n1.
+  **Enable tracing** to capture every step:\n```python\nmlflow.tracing.enable()\n```\n\n2.
+  **Check the Traces tab** in MLflow UI to see:\n   - What documents were retrieved\n   -
+  The actual prompts sent to the LLM\n   - Token usage and latency per step\n\nWhat
+  kind of inconsistency are you seeing - retrieval or generation issues?"}'
+state: OK
+trace_id: tr-67d07f44053db9e67452dbc281870c98
+trace_location:
+  mlflow_experiment:
+    experiment_id: '896578296305049802'
+  type: MLFLOW_EXPERIMENT

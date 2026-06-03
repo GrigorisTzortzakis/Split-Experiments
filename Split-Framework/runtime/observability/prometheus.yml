@@ -1,0 +1,26 @@
+global:
+  scrape_interval: 5s
+  evaluation_interval: 5s
+
+scrape_configs:
+  - job_name: prometheus
+    static_configs:
+      - targets:
+          - prometheus:9090
+
+  - job_name: kepler
+    static_configs:
+      - targets:
+          - kepler:28282
+
+  - job_name: docker_stats
+    scrape_interval: 15s
+    scrape_timeout: 14s
+    static_configs:
+      - targets:
+          - docker-stats:9417
+
+  - job_name: hwinfo
+    static_configs:
+      - targets:
+          - pushgateway:9091

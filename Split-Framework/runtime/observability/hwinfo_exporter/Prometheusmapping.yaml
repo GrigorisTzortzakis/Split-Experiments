@@ -1,0 +1,15 @@
+metadata:
+  description: Split Framework HWiNFO mapping
+
+mapping:
+  - name: IndividualValues
+    patterns:
+      - '(?<Entity>CPU) \((?<MetricName>(Tctl/Tdie|average|PPT))\)'
+      - '(?<Entity>CPU) (?<MetricName>(PPT|Package Power|Core Power|SoC Power))(?: \((?<MetricCategory>[^)]+)\))?'
+      - '(?<Entity_CPU>)(?<MetricName>Core\+SoC Power)(?: \((?<MetricCategory>[^)]+)\))?'
+      - '(?<Entity>Core) (?<CoreNo>\d+) (?<MetricName>Power)(?: \((?<MetricCategory>[^)]+)\))?'
+  - name: AggregateValues
+    patterns: []
+
+wmiService:
+  sources: []

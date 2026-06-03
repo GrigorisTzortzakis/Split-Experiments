@@ -8,6 +8,7 @@ from runtime.exports.export_results_workbook import (
     build_fallback_epoch_rows,
     build_run_summary_from_epochs,
     load_fallback_run_series,
+    parse_latest_observability_summary,
     parse_epoch_summary_line,
     parse_filename_metadata,
     parse_latest_comm_breakdown_totals,
@@ -289,6 +290,15 @@ COMMON_SUMMARY_METRIC_MAP = {
     "avg_send_time_s": "time_send_avg_s",
     "avg_recv_time_s": "time_recv_avg_s",
     "avg_total_compression": "comm_compression_avg",
+    "observability_samples": "observability_samples",
+    "cpu_package_power_w_avg": "cpu_package_power_avg_w",
+    "cpu_package_power_w_max": "cpu_package_power_max_w",
+    "cpu_ppt_w_avg": "cpu_ppt_avg_w",
+    "cpu_ppt_w_max": "cpu_ppt_max_w",
+    "cpu_core_power_w_avg": "cpu_core_power_avg_w",
+    "cpu_core_power_w_max": "cpu_core_power_max_w",
+    "cpu_soc_power_w_avg": "cpu_soc_power_avg_w",
+    "cpu_soc_power_w_max": "cpu_soc_power_max_w",
 }
 
 BASELINE_SUMMARY_METRIC_MAP = {
@@ -442,6 +452,7 @@ def _load_single_run(log_path: Path, logs_root: Path) -> Tuple[List[Dict[str, ob
     rel_path = safe_rel_path(log_path, logs_root)
     method_family, method_variant, experiment_label = parse_log_path_metadata(rel_path)
     fallback_comm_totals = parse_latest_comm_breakdown_totals(log_path)
+    observability_summary = parse_latest_observability_summary(log_path)
 
     epochs: List[Dict[str, object]] = []
     with log_path.open("r", encoding="utf-8", errors="ignore") as handle:
@@ -495,6 +506,7 @@ def _load_single_run(log_path: Path, logs_root: Path) -> Tuple[List[Dict[str, ob
         epochs=epochs,
         is_fallback=is_fallback,
         fallback_comm_totals=fallback_comm_totals,
+        observability_summary=observability_summary,
     )
     return epochs, summary
 
@@ -692,6 +704,7 @@ def backfill_logs_to_mlflow(
                         "method_variant": str(summary.get("method_variant") or ""),
                         "run_log": rel_log,
                         "import_source": "historical_backfill",
+                        "observability_source": str(summary.get("observability_source") or ""),
                         **comparison_tags,
                     }
                 )
@@ -744,7 +757,7 @@ def export_run_to_mlflow(*, args, project_root: Path, success: bool, error_messa
         else:
             experiment_name = _args_experiment_name(args, is_quantized=is_quantized)
 
-    grafana_dashboard_url = "http://127.0.0.1:4000/d/split-framework-live/split-framework-live-containers"
+    grafana_dashboard_url = "http://127.0.0.1:4000/d/split-framework-observability-live/split-framework-observability-live"
     mlflow_ui_url = "http://127.0.0.1:5000"
 
     mlflow.set_tracking_uri(tracking_uri)
@@ -768,6 +781,7 @@ def export_run_to_mlflow(*, args, project_root: Path, success: bool, error_messa
                 "run_log": rel_log,
                 "observability_grafana_url": grafana_dashboard_url,
                 "observability_mlflow_ui": mlflow_ui_url,
+                "observability_source": str(summary.get("observability_source") or ""),
                 **summary_tags,
             }
         )
